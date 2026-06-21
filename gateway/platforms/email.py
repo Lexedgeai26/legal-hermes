@@ -44,6 +44,7 @@ from gateway.platforms.base import (
     cache_image_from_bytes,
 )
 from gateway.config import Platform, PlatformConfig
+from gateway.email_filter import evaluate_email_headers
 
 logger = logging.getLogger(__name__)
 # Automated sender patterns — emails from these are silently ignored
@@ -517,28 +518,59 @@ class EmailAdapter(BasePlatformAdapter):
                     if len(self._seen_uids) > self._seen_uids_max:
                         self._trim_seen_uids()
 
-                    status, msg_data = imap.uid("fetch", uid, "(RFC822)")
+                    status, header_data = imap.uid("fetch", uid, "(BODY.PEEK[HEADER])")
                     if status != "OK":
                         continue
 
-                    raw_email = msg_data[0][1]
-                    msg = email_lib.message_from_bytes(raw_email)
+                    raw_headers = header_data[0][1]
+                    header_msg = email_lib.message_from_bytes(raw_headers)
 
-                    sender_raw = msg.get("From", "")
+                    sender_raw = header_msg.get("From", "")
                     sender_addr = _extract_email_address(sender_raw)
                     sender_name = _decode_header_value(sender_raw)
                     # Remove email from name if present
                     if "<" in sender_name:
                         sender_name = sender_name.split("<")[0].strip().strip('"')
 
-                    subject = _decode_header_value(msg.get("Subject", "(no subject)"))
-                    message_id = msg.get("Message-ID", "")
-                    in_reply_to = msg.get("In-Reply-To", "")
-                    # Skip automated/noreply senders before any processing
-                    msg_headers = dict(msg.items())
+                    subject = _decode_header_value(header_msg.get("Subject", "(no subject)"))
+                    message_id = header_msg.get("Message-ID", "")
+                    in_reply_to = header_msg.get("In-Reply-To", "")
+                    msg_headers = dict(header_msg.items())
                     if _is_automated_sender(sender_addr, msg_headers):
-                        logger.debug("[Email] Skipping automated sender: %s", sender_addr)
+                        decision = evaluate_email_headers(
+                            sender_addr=sender_addr,
+                            subject=subject,
+                            headers=msg_headers,
+                        )
+                        if not decision.should_fetch:
+                            logger.debug(
+                                "[Email] Skipping automated sender: %s (%s)",
+                                sender_addr,
+                                decision.reason,
+                            )
+                            continue
+
+                    decision = evaluate_email_headers(
+                        sender_addr=sender_addr,
+                        subject=subject,
+                        headers=msg_headers,
+                    )
+                    if not decision.should_fetch:
+                        logger.info(
+                            "[Email] %s message from %s: %s (%s)",
+                            "Holding" if decision.action == "hold" else "Skipping",
+                            sender_addr,
+                            subject,
+                            decision.reason,
+                        )
                         continue
+
+                    status, msg_data = imap.uid("fetch", uid, "(BODY.PEEK[])")
+                    if status != "OK":
+                        continue
+
+                    raw_email = msg_data[0][1]
+                    msg = email_lib.message_from_bytes(raw_email)
                     body = _extract_text_body(msg)
                     attachments = _extract_attachments(msg, skip_attachments=self._skip_attachments)
 
@@ -552,6 +584,12 @@ class EmailAdapter(BasePlatformAdapter):
                         "body": body,
                         "attachments": attachments,
                         "date": msg.get("Date", ""),
+                        "email_filter": {
+                            "reason": decision.reason,
+                            "route_to": decision.route_to,
+                            "matched_domain": decision.matched_domain,
+                            "matched_terms": list(decision.matched_terms),
+                        },
                     })
             finally:
                 try:

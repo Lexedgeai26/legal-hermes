@@ -1,0 +1,129 @@
+# ============================================================================
+# LexEdge — Email relevance filter
+#
+# Decides which inbound emails the agent fetches and routes vs. ignores.
+# Composes like the skills: reusable DOMAIN keyword packs + thin ROLE overlays,
+# both switched on by the user's practice profile (active_domains, roles).
+#
+# SAFETY MODEL (read first): keyword whitelisting alone is unsafe for legal —
+# a missed court email is a missed deadline. So:
+#   - junk is ignored,
+#   - domain matches are fetched + routed,
+#   - never_discard signals are fetched EVEN WITHOUT a keyword match,
+#   - anything ambiguous (not junk, no match) is HELD for review, never dropped.
+# Discard is conservative by design.
+# ============================================================================
+version: 1
+
+# 1. Global junk — safe to ignore (unless a never_discard signal overrides) ----
+exclude:
+  subject_contains: [unsubscribe, newsletter, webinar, "% off", sale, promotion,
+                     "you're invited", "verify your", OTP, "one-time password",
+                     "log in attempt", "your receipt", survey]
+  sender_contains: ["no-reply@", "noreply@", "newsletter@", "marketing@",
+                    "mailer@", "notifications@", "@linkedin.com", "@facebook.com"]
+  has_list_unsubscribe_header: true   # presence of List-Unsubscribe ⇒ bulk mail
+
+# 2. Never-discard safety net — ALWAYS fetch, overrides exclude -----------------
+never_discard:
+  sender_domains: [gov.in, nic.in, ecourts.gov.in, gst.gov.in, gstn.org.in,
+                   incometax.gov.in, mca.gov.in, epfindia.gov.in, esic.in,
+                   ipindia.gov.in, sci.gov.in]
+  subject_regex:
+    - 'CNR[:\s-]*[A-Za-z0-9]{16}'                 # eCourts CNR number (tune per court)
+    - '\b(W\.?P\.?|C\.?S\.?|CRL\.?\s?A|O\.?A|SLP|CA|RFA|CRP)\s*\(?\w*\)?\s*\d+\s*/\s*\d{2,4}'  # case no.
+  from_matter_contacts: true          # clients & opposing counsel in the matter DB
+
+# 3. Domain keyword packs (reusable; mirror the practice-area packs) ------------
+domains:
+  litigation:
+    subject_keywords: ["cause list", hearing, listing, adjournment, "next date",
+                       "order copy", "certified copy", summons, notice, vakalatnama,
+                       caveat, "for hearing", "matter listed"]
+    sender_contains: [ecourts, nic.in, "@sci.gov.in"]
+    route_to: hearing-prep
+  criminal:
+    subject_keywords: [FIR, "charge sheet", chargesheet, bail, "anticipatory bail",
+                       NBW, "non-bailable", remand, "41A", complaint, "u/s"]
+    route_to: intake-triage
+  civil:
+    subject_keywords: [plaint, "written statement", summons, decree, execution,
+                       caveat, injunction, "interim relief", "O.39", rejoinder]
+    route_to: intake-triage
+  gst:
+    subject_keywords: [GST, "show cause", SCN, DRC-01, DRC-01A, DRC-03, ASMT-10,
+                       GSTR, "demand notice", "section 73", "section 74", ITC,
+                       "e-way bill", refund, assessment, intimation, APL-01]
+    sender_contains: [gst.gov.in, gstn]
+    route_to: gst-notice-reply
+  income_tax:
+    subject_keywords: ["income tax", "143(1)", "143(2)", "142(1)", "148",
+                       "intimation u/s", ITR, TDS, "demand", "u/s 156", CIT, ITAT,
+                       assessment, "e-proceedings"]
+    sender_contains: [incometax.gov.in]
+    route_to: legal-research
+  corporate:
+    subject_keywords: ["board resolution", AGM, EGM, "share purchase", SHA, SPA,
+                       "due diligence", "term sheet", shareholders, "for execution"]
+    route_to: redline-review
+  mca:
+    subject_keywords: [ROC, MCA, "annual return", AOC-4, MGT-7, DIR-3, DPT-3,
+                       ADT-1, INC, DIN, "struck off", "compliance certificate"]
+    sender_contains: [mca.gov.in]
+    route_to: compliance-check
+  labour:
+    subject_keywords: [PF, ESI, EPFO, gratuity, bonus, wages, termination,
+                       "show cause", inspection, "labour commissioner", "S&E",
+                       "shops and establishment", retrenchment]
+    sender_contains: [epfindia.gov.in, esic.in]
+    route_to: compliance-check
+  ipr:
+    subject_keywords: [trademark, "TM application", opposition, "examination report",
+                       FER, patent, copyright, renewal, infringement,
+                       "cease and desist"]
+    sender_contains: [ipindia.gov.in]
+    route_to: legal-research
+  contracts:
+    subject_keywords: ["for your review", "please review", "for review", redline,
+                       "execution copy", "for signature", "draft agreement", NDA,
+                       MSA, SOW, DPA, "renewal", counterparty, "revised draft"]
+    route_to: contract-triage
+
+# 4. Role overlays — active packs + role-specific extra signals -----------------
+# active_domains is normally taken from the user's practice profile; these are
+# sensible defaults / additions.
+roles:
+  individual_advocate:
+    active_domains: [litigation, criminal, civil]   # ∩ the advocate's profile areas
+    extra_subject_keywords: [notice, demand, reply, "legal notice"]
+  litigation_lawyer:
+    active_domains: [litigation, criminal, civil]
+    extra_subject_keywords: [stay, "interim order", "miscellaneous application"]
+  law_firm:
+    active_domains: [all]
+    extra_subject_keywords: [engagement, conflict, "new matter", retainer, invoice]
+  in_house:
+    active_domains: [contracts, corporate, labour, gst, income_tax]
+    extra_subject_keywords: ["approval needed", "vendor", "procurement", "policy"]
+  legal_consultant:
+    active_domains: [corporate, income_tax, gst]
+    extra_subject_keywords: [opinion, advice, structuring, memo, "scope of work"]
+
+# 5. Scoring & action ----------------------------------------------------------
+action:
+  fetch_if:   "never_discard OR domain_match(active_domains) OR role_keyword_match"
+  discard_if: "exclude AND NOT (never_discard OR domain_match OR role_keyword_match)"
+  hold_for_review_if: "no match AND NOT exclude"   # ambiguous legal mail is never dropped
+  on_fetch:
+    - send to the `intake-triage` skill with the matched domain as a routing hint
+    - attachments (pdf/docx) extracted and passed to fact-extract / classify
+  discard_aggressiveness: conservative   # user-tunable: conservative | balanced | aggressive
+
+# 6. User configuration (exposed in the UI) ------------------------------------
+# - Active packs derive from the practice profile; user can toggle.
+# - Custom additions per user:
+#     custom_sender_allow: []      # e.g. a specific client/court clerk address
+#     custom_subject_keywords: []  # firm/practice-specific terms
+#     custom_exclude: []           # known noisy senders to always ignore
+# - Privacy: run the filter inside the trusted boundary (desktop / in-country);
+#   only fetch bodies/attachments for emails that pass — do not bulk-export the inbox.

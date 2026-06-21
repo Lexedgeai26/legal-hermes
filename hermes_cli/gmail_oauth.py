@@ -86,7 +86,8 @@ def _client_from_env() -> tuple[str, str]:
 
 def _save_credentials(creds: GmailCredentials) -> None:
     path = credentials_path()
-    secure_parent_dir(path.parent)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    secure_parent_dir(path)
     payload = {
         "access": creds.access_token,
         "refresh": creds.refresh_token,
