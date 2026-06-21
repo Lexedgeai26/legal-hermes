@@ -1,4 +1,33 @@
 const _READY_RE = /^HERMES_DASHBOARD_READY port=(\d+)/m
+const { execFile } = require('node:child_process')
+
+function detectListeningPort(pid, callback) {
+  if (!pid || process.platform === 'win32') {
+    callback(null)
+    return
+  }
+
+  execFile(
+    'lsof',
+    ['-Pan', '-p', String(pid), '-iTCP', '-sTCP:LISTEN'],
+    { timeout: 2_000 },
+    (error, stdout) => {
+      if (error || !stdout) {
+        callback(null)
+        return
+      }
+      const lines = stdout.split(/\r?\n/)
+      for (const line of lines) {
+        const match = line.match(/\b(?:127\.0\.0\.1|localhost|\[::1\]|\*)[:.](\d+)\s+\(LISTEN\)$/)
+        if (match) {
+          callback(parseInt(match[1], 10))
+          return
+        }
+      }
+      callback(null)
+    }
+  )
+}
 
 /**
  * Watch a child process's stdout for the `HERMES_DASHBOARD_READY port=<N>`
@@ -13,7 +42,7 @@ const _READY_RE = /^HERMES_DASHBOARD_READY port=(\d+)/m
  * on every terminal path — resolve, reject, or timeout — so repeated
  * backend spawns don't leak listener slots on the child.
  */
-function waitForDashboardPort(child, timeoutMs = 45_000) {
+function waitForDashboardPort(child, timeoutMs = 120_000) {
   return new Promise((resolve, reject) => {
     let buf = ''
     let done = false
@@ -22,6 +51,7 @@ function waitForDashboardPort(child, timeoutMs = 45_000) {
       if (done) return
       done = true
       clearTimeout(timer)
+      clearInterval(portProbe)
       child.stdout.off('data', onData)
       child.off('exit', onExit)
       child.off('error', onError)
@@ -44,7 +74,7 @@ function waitForDashboardPort(child, timeoutMs = 45_000) {
 
     function onExit(code, signal) {
       cleanup()
-      reject(new Error(`Hermes backend: exited before port announcement (${signal || code})`))
+      reject(new Error(`LexEdge AI backend: exited before port announcement (${signal || code})`))
     }
 
     function onError(err) {
@@ -52,14 +82,25 @@ function waitForDashboardPort(child, timeoutMs = 45_000) {
       reject(err)
     }
 
+    function probeListeningPort() {
+      detectListeningPort(child.pid, port => {
+        if (done || !port) return
+        cleanup()
+        resolve(port)
+      })
+    }
+
     const timer = setTimeout(() => {
       cleanup()
-      reject(new Error(`Timed out waiting for Hermes backend port announcement (${timeoutMs}ms)`))
+      reject(new Error(`Timed out waiting for LexEdge AI backend port announcement (${timeoutMs}ms)`))
     }, timeoutMs)
+    const portProbe = setInterval(probeListeningPort, 1_000)
+    if (typeof portProbe.unref === 'function') portProbe.unref()
 
     child.stdout.on('data', onData)
     child.on('exit', onExit)
     child.on('error', onError)
+    probeListeningPort()
   })
 }
 

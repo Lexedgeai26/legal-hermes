@@ -246,6 +246,45 @@ class TestCreateProfile:
             / "SKILL.md"
         ).read_text() == "---\nname: installed-skill\n---\n"
 
+    def test_practice_role_seeds_soul_metadata_and_skill(self, profile_env):
+        profile_dir = create_profile(
+            "litigator",
+            no_alias=True,
+            practice_role="litigation-lawyer",
+        )
+
+        soul = (profile_dir / "SOUL.md").read_text(encoding="utf-8")
+        assert "LexEdge AI" in soul
+        assert "Litigation Lawyer" in soul
+        assert "draft for professional review" in soul
+        assert "Role skill guidance" in soul
+        assert "# Hearing Prep" in soul
+        assert "Where we are" in soul
+
+        meta = yaml.safe_load((profile_dir / "profile.yaml").read_text()) or {}
+        assert meta["practice_role"] == "litigation-lawyer"
+        assert meta["practice_role_label"] == "Litigation Lawyer"
+        assert "hearing preparation" in meta["description"].lower()
+
+        skill_path = (
+            profile_dir
+            / "skills"
+            / "legal-india"
+            / "hearing-prep"
+            / "SKILL.md"
+        )
+        assert skill_path.exists()
+        assert "name: hearing-prep" in skill_path.read_text(encoding="utf-8")
+
+    def test_practice_role_rejects_no_skills(self, profile_env):
+        with pytest.raises(ValueError, match="practice roles install"):
+            create_profile(
+                "badrole",
+                no_alias=True,
+                no_skills=True,
+                practice_role="law-firm",
+            )
+
     def test_clone_all_copies_entire_tree(self, profile_env):
         tmp_path = profile_env
         default_home = tmp_path / ".hermes"

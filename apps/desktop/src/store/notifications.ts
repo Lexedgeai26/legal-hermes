@@ -50,6 +50,15 @@ function cleanErrorText(value: string) {
 
 const ERROR_SUMMARIES: { test: (msg: string) => boolean; summarize: (msg: string) => string }[] = [
   {
+    test: msg =>
+      /\bTraceback\b/i.test(msg) ||
+      /\b[A-Za-z_][A-Za-z0-9_]*Error\b/.test(msg) ||
+      /unexpected keyword argument/i.test(msg) ||
+      /\b[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\(/.test(msg),
+    summarize: () =>
+      'LexEdge Personal AI Assistant could not complete that action. Please try again; if it repeats, open logs and share them with support.'
+  },
+  {
     test: msg => /incorrect api key provided/i.test(msg) || /['"]code['"]\s*:\s*['"]invalid_api_key['"]/i.test(msg),
     summarize: msg => {
       const status = msg.match(/(?:error code|status(?:Code)?)[^\d]*(\d{3})/i)?.[1]

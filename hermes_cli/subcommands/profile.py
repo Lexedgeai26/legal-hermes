@@ -62,6 +62,18 @@ def build_profile_parser(subparsers, *, cmd_profile: Callable) -> None:
              "Used by the kanban decomposer to route tasks based on role instead "
              "of profile name alone. Skip and add later via `hermes profile describe`.",
     )
+    profile_create.add_argument(
+        "--practice-role",
+        choices=[
+            "individual-advocate",
+            "litigation-lawyer",
+            "law-firm",
+            "in-house-counsel",
+            "legal-consultant",
+        ],
+        default=None,
+        help="Create a LexEdge legal practice workspace with role-specific SOUL.md and skills.",
+    )
 
     profile_delete = profile_subparsers.add_parser("delete", help="Delete a profile")
     profile_delete.add_argument("profile_name", help="Profile to delete")

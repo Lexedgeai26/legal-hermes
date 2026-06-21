@@ -4542,17 +4542,15 @@ class BasePlatformAdapter(ABC):
         except Exception as e:
             await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)
             logger.error("[%s] Error handling message: %s", self.name, e, exc_info=True)
-            # Send the error to the user so they aren't left with radio silence
+            # Send a generic error to the user so technical exception details
+            # stay in logs instead of leaking into WhatsApp or other clients.
             try:
-                error_type = type(e).__name__
-                error_detail = str(e)[:300] if str(e) else "no details available"
                 _thread_metadata = _thread_metadata_for_source(event.source, _reply_anchor_for_event(event))
                 await self.send(
                     chat_id=event.source.chat_id,
                     content=(
-                        f"Sorry, I encountered an error ({error_type}).\n"
-                        f"{error_detail}\n"
-                        "Try again or use /reset to start a fresh session."
+                        "LexEdge Personal AI Assistant could not complete this reply.\n\n"
+                        "Please try again in a moment. If it happens again, restart messaging from the desktop app."
                     ),
                     metadata=_thread_metadata,
                 )

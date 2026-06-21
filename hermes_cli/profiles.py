@@ -565,6 +565,10 @@ class ProfileInfo:
     # surfaces a "review" badge in this case so the user can edit or
     # accept.
     description_auto: bool = False
+    # LexEdge/legal practice role metadata when the profile was created from a
+    # practice preset (for example "litigation-lawyer" or "law-firm").
+    practice_role: str = ""
+    practice_role_label: str = ""
 
 
 def _read_distribution_meta(profile_dir: Path) -> tuple:
@@ -661,18 +665,20 @@ def read_profile_meta(profile_dir: Path) -> dict:
     """
     path = _profile_yaml_path(profile_dir)
     if not path.is_file():
-        return {"description": "", "description_auto": False}
+        return {"description": "", "description_auto": False, "practice_role": "", "practice_role_label": ""}
     try:
         import yaml
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except Exception:
-        return {"description": "", "description_auto": False}
+        return {"description": "", "description_auto": False, "practice_role": "", "practice_role_label": ""}
     if not isinstance(data, dict):
-        return {"description": "", "description_auto": False}
+        return {"description": "", "description_auto": False, "practice_role": "", "practice_role_label": ""}
     return {
         "description": str(data.get("description") or "").strip(),
         "description_auto": bool(data.get("description_auto", False)),
+        "practice_role": str(data.get("practice_role") or "").strip(),
+        "practice_role_label": str(data.get("practice_role_label") or "").strip(),
     }
 
 
@@ -681,6 +687,8 @@ def write_profile_meta(
     *,
     description: Optional[str] = None,
     description_auto: Optional[bool] = None,
+    practice_role: Optional[str] = None,
+    practice_role_label: Optional[str] = None,
 ) -> None:
     """Update ``<profile_dir>/profile.yaml`` in place.
 
@@ -705,6 +713,10 @@ def write_profile_meta(
         existing["description"] = description.strip()
     if description_auto is not None:
         existing["description_auto"] = bool(description_auto)
+    if practice_role is not None:
+        existing["practice_role"] = practice_role.strip()
+    if practice_role_label is not None:
+        existing["practice_role_label"] = practice_role_label.strip()
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(existing, f, sort_keys=False, default_flow_style=False)
 
@@ -738,6 +750,8 @@ def list_profiles() -> List[ProfileInfo]:
             distribution_source=dist_source,
             description=meta.get("description", ""),
             description_auto=meta.get("description_auto", False),
+            practice_role=meta.get("practice_role", ""),
+            practice_role_label=meta.get("practice_role_label", ""),
         ))
 
     # Named profiles
@@ -776,6 +790,8 @@ def list_profiles() -> List[ProfileInfo]:
                 distribution_source=dist_source,
                 description=meta.get("description", ""),
                 description_auto=meta.get("description_auto", False),
+                practice_role=meta.get("practice_role", ""),
+                practice_role_label=meta.get("practice_role_label", ""),
             ))
 
     return profiles
@@ -830,6 +846,7 @@ def create_profile(
     no_alias: bool = False,
     no_skills: bool = False,
     description: Optional[str] = None,
+    practice_role: Optional[str] = None,
 ) -> Path:
     """Create a new profile directory.
 
@@ -863,6 +880,15 @@ def create_profile(
             "--no-skills is mutually exclusive with --clone / --clone-from / --clone-all "
             "(cloning explicitly copies skills from the source profile)."
         )
+    resolved_practice_role = None
+    if practice_role:
+        from hermes_cli.legal_practice_profiles import normalize_practice_role
+        resolved_practice_role = normalize_practice_role(practice_role)
+        if no_skills:
+            raise ValueError(
+                "--practice-role is mutually exclusive with --no-skills "
+                "(practice roles install role-specific legal skills)."
+            )
     canon = normalize_profile_name(name)
     validate_profile_name(canon)
 
@@ -981,6 +1007,23 @@ def create_profile(
             )
         except OSError:
             pass  # best-effort — the feature still works via the empty skills/ dir
+
+    # Apply LexEdge legal-practice role presets after the base profile exists.
+    # This intentionally runs after cloning/default SOUL seeding so the role
+    # owns the profile identity and top-layer skills.
+    if resolved_practice_role:
+        try:
+            from hermes_cli.legal_practice_profiles import apply_practice_role
+            role_result = apply_practice_role(profile_dir, resolved_practice_role)
+            write_profile_meta(
+                profile_dir,
+                description=role_result["description"],
+                description_auto=False,
+                practice_role=role_result["practice_role"],
+                practice_role_label=role_result["practice_role_label"],
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Could not apply practice role {resolved_practice_role!r}: {exc}") from exc
 
     # Cloned configs can be older than the running Hermes (or predate schema
     # tracking entirely). Migrate config-only clones immediately so

@@ -41,18 +41,18 @@ function normalizeRemoteBaseUrl(rawUrl) {
   const value = String(rawUrl || '').trim()
 
   if (!value) {
-    throw new Error('Remote gateway URL is required.')
+    throw new Error('Remote backend URL is required.')
   }
 
   let parsed
   try {
     parsed = new URL(value)
   } catch (error) {
-    throw new Error(`Remote gateway URL is not valid: ${error.message}`)
+    throw new Error(`Remote backend URL is not valid: ${error.message}`)
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`Remote gateway URL must be http:// or https://, got ${parsed.protocol}`)
+    throw new Error(`Remote backend URL must be http:// or https://, got ${parsed.protocol}`)
   }
 
   parsed.hash = ''

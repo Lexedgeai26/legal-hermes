@@ -29,7 +29,12 @@ import { randomBytes, createHash } from 'crypto';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import qrcode from 'qrcode-terminal';
-import { matchesAllowedUser, parseAllowedUsers } from './allowlist.js';
+import {
+  expandWhatsAppIdentifiers,
+  matchesAllowedUser,
+  normalizeWhatsAppIdentifier,
+  parseAllowedUsers,
+} from './allowlist.js';
 
 // Parse CLI args
 const args = process.argv.slice(2);
@@ -71,7 +76,7 @@ try {
 const PAIR_ONLY = args.includes('--pair-only');
 const WHATSAPP_MODE = getArg('mode', process.env.WHATSAPP_MODE || 'self-chat'); // "bot" or "self-chat"
 const ALLOWED_USERS = parseAllowedUsers(process.env.WHATSAPP_ALLOWED_USERS || '');
-const DEFAULT_REPLY_PREFIX = '⚕ *Hermes Agent*\n────────────\n';
+const DEFAULT_REPLY_PREFIX = '⚖️ *LexEdge Personal AI Assistant*\n────────────\n';
 const REPLY_PREFIX = process.env.WHATSAPP_REPLY_PREFIX === undefined
   ? DEFAULT_REPLY_PREFIX
   : process.env.WHATSAPP_REPLY_PREFIX.replace(/\\n/g, '\n');
@@ -144,6 +149,28 @@ function normalizeWhatsAppId(value) {
   return String(value).replace(':', '@');
 }
 
+function currentAccountIdentifiers() {
+  const identifiers = new Set();
+  for (const raw of [sock?.user?.id, sock?.user?.lid]) {
+    const normalized = normalizeWhatsAppIdentifier(raw);
+    if (!normalized) continue;
+    for (const alias of expandWhatsAppIdentifiers(normalized, SESSION_DIR)) {
+      identifiers.add(alias);
+    }
+  }
+  return identifiers;
+}
+
+function isCurrentAccountIdentifier(value) {
+  const normalized = normalizeWhatsAppIdentifier(value);
+  if (!normalized) return false;
+  return currentAccountIdentifiers().has(normalized);
+}
+
+function isAllowedWhatsAppIdentifier(value) {
+  return matchesAllowedUser(value, ALLOWED_USERS, SESSION_DIR);
+}
+
 function getMessageContent(msg) {
   const content = msg?.message || {};
   if (content.ephemeralMessage?.message) return content.ephemeralMessage.message;
@@ -206,7 +233,7 @@ async function startSocket() {
     auth: state,
     logger,
     printQRInTerminal: false,
-    browser: ['Hermes Agent', 'Chrome', '120.0'],
+    browser: ['LexEdge Personal AI Assistant', 'Chrome', '120.0'],
     syncFullHistory: false,
     markOnlineOnConnect: false,
     // Required for Baileys 7.x: without this, incoming messages that need
@@ -224,6 +251,9 @@ async function startSocket() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
+      if (process.env.HERMES_WHATSAPP_QR_JSON === '1') {
+        console.log(`HERMES_WHATSAPP_QR ${JSON.stringify({ qr })}`);
+      }
       console.log('\n📱 Scan this QR code with WhatsApp on your phone:\n');
       qrcode.generate(qr, { small: true });
       console.log('\nWaiting for scan...\n');
@@ -297,10 +327,7 @@ async function startSocket() {
         // WhatsApp now uses LID (Linked Identity Device) format: 67427329167522@lid
         // AND classic format: 34652029134@s.whatsapp.net
         // sock.user has both: { id: "number:10@s.whatsapp.net", lid: "lid_number:10@lid" }
-        const myNumber = (sock.user?.id || '').replace(/:.*@/, '@').replace(/@.*/, '');
-        const myLid = (sock.user?.lid || '').replace(/:.*@/, '@').replace(/@.*/, '');
-        const chatNumber = chatId.replace(/@.*/, '');
-        const isSelfChat = (myNumber && chatNumber === myNumber) || (myLid && chatNumber === myLid);
+        const isSelfChat = isCurrentAccountIdentifier(chatId);
         if (!isSelfChat) continue;
       }
 
@@ -311,17 +338,28 @@ async function startSocket() {
       // to arbitrary incoming messages (#8389).
       if (!msg.key.fromMe) {
         if (WHATSAPP_MODE === 'self-chat') {
-          try {
-            console.log(JSON.stringify({
-              event: 'ignored',
-              reason: 'self_chat_mode_rejects_non_self',
-              chatId,
-              senderId,
-            }));
-          } catch {}
-          continue;
+          const isOwnSelfChat =
+            !isGroup &&
+            !chatId.includes('status') &&
+            (
+              isCurrentAccountIdentifier(chatId) ||
+              isCurrentAccountIdentifier(senderId) ||
+              isAllowedWhatsAppIdentifier(chatId) ||
+              isAllowedWhatsAppIdentifier(senderId)
+            );
+          if (!isOwnSelfChat) {
+            try {
+              console.log(JSON.stringify({
+                event: 'ignored',
+                reason: 'self_chat_mode_rejects_non_self',
+                chatId,
+                senderId,
+              }));
+            } catch {}
+            continue;
+          }
         }
-        if (!matchesAllowedUser(senderId, ALLOWED_USERS, SESSION_DIR)) {
+        if (!isAllowedWhatsAppIdentifier(senderId) && !isAllowedWhatsAppIdentifier(chatId) && !isCurrentAccountIdentifier(senderId) && !isCurrentAccountIdentifier(chatId)) {
           try {
             console.log(JSON.stringify({
               event: 'ignored',

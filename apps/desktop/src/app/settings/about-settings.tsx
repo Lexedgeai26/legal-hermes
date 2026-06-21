@@ -19,7 +19,8 @@ import {
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
 import { UninstallSection } from './uninstall-section'
 
-const RELEASE_NOTES_URL = 'https://github.com/NousResearch/hermes-agent/releases'
+const HERMES_REPO_URL = 'https://github.com/NousResearch/hermes-agent'
+const LEXEDGE_WEBSITE_URL = 'https://www.lexedge.ai/'
 
 function relativeTime(ms: number | undefined, a: Translations['settings']['about']) {
   if (!ms) {
@@ -148,26 +149,53 @@ export function AboutSettings() {
 
             <Button asChild className="ml-auto" size="sm" variant="text">
               <a
-                href={RELEASE_NOTES_URL}
+                href={LEXEDGE_WEBSITE_URL}
                 onClick={event => {
                   event.preventDefault()
-                  void window.hermesDesktop?.openExternal?.(RELEASE_NOTES_URL)
+                  void window.hermesDesktop?.openExternal?.(LEXEDGE_WEBSITE_URL)
                 }}
                 rel="noreferrer"
                 target="_blank"
               >
                 <ExternalLink className="size-3" />
-                {a.releaseNotes}
+                {a.website}
               </a>
             </Button>
           </div>
         </div>
 
         <ListRow
+          description="Indian legal and document-focused personal AI assistant by LexEdge AI Labs Private Limited."
+          hint={LEXEDGE_WEBSITE_URL}
+          title="Website"
+        />
+
+        <ListRow
           description={a.automaticUpdatesDesc}
           hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
           title={a.automaticUpdates}
         />
+
+        <ListRow
+          description="LexEdge Personal AI Assistant is built on and adapted from the original open-source Hermes Agent project by Nous Research. Full credit, copyright, and upstream attribution remain with Hermes Agent / Nous Research under the MIT License."
+          hint="Original project: NousResearch/hermes-agent · Copyright (c) 2025 Nous Research"
+          title="Original Hermes Agent credit"
+        />
+
+        <Button asChild className="mt-2" size="sm" variant="text">
+          <a
+            href={HERMES_REPO_URL}
+            onClick={event => {
+              event.preventDefault()
+              void window.hermesDesktop?.openExternal?.(HERMES_REPO_URL)
+            }}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLink className="size-3" />
+            NousResearch/hermes-agent
+          </a>
+        </Button>
 
         <UninstallSection />
       </div>

@@ -43,36 +43,36 @@ export const en: Translations = {
   },
 
   boot: {
-    ready: 'Hermes Desktop is ready',
+    ready: 'LexEdge AI is ready',
     desktopBootFailedWithMessage: message => `Desktop boot failed: ${message}`,
     steps: {
       connectingGateway: 'Connecting live desktop gateway',
-      loadingSettings: 'Loading Hermes settings',
+      loadingSettings: 'Loading LexEdge AI settings',
       loadingSessions: 'Loading recent sessions',
       startingDesktopConnection: 'Starting desktop connection',
-      startingHermesDesktop: 'Starting Hermes Desktop…'
+      startingHermesDesktop: 'Starting LexEdge AI…'
     },
     errors: {
-      backgroundExited: 'Hermes background process exited.',
-      backgroundExitedDuringStartup: 'Hermes background process exited during startup.',
+      backgroundExited: 'LexEdge AI background process exited.',
+      backgroundExitedDuringStartup: 'LexEdge AI background process exited during startup.',
       backendStopped: 'Backend stopped',
       desktopBootFailed: 'Desktop boot failed',
-      gatewaySignInRequired: 'Gateway sign-in required',
+      gatewaySignInRequired: 'Remote backend sign-in required',
       ipcBridgeUnavailable: 'Desktop IPC bridge is unavailable.'
     },
     failure: {
-      title: "Hermes couldn't start",
+      title: "LexEdge AI couldn't start",
       description:
-        "The background gateway didn't come up. Try one of the recovery steps below. Nothing here deletes your chats or settings.",
-      remoteTitle: 'Remote gateway sign-in required',
+        "The local backend didn't come up. Try one of the recovery steps below. Nothing here deletes your chats or settings.",
+      remoteTitle: 'Remote backend sign-in required',
       remoteDescription:
-        'Your remote gateway session has expired. Sign in again to reconnect. Nothing here deletes your chats or settings.',
+        'Your remote backend session has expired. Sign in again to reconnect. Nothing here deletes your chats or settings.',
       retry: 'Retry',
       repairInstall: 'Repair install',
-      useLocalGateway: 'Use local gateway',
+      useLocalGateway: 'Use local backend',
       openLogs: 'Open logs',
       repairHint: 'Repair re-runs the installer and can take a few minutes on a fresh machine.',
-      remoteSignInHint: 'Opens the gateway login window. Use local gateway to switch to the bundled backend instead.',
+      remoteSignInHint: 'Opens the backend login window. Use local backend to switch to the bundled backend instead.',
       hideRecentLogs: 'Hide recent logs',
       showRecentLogs: 'Show recent logs',
       signedInTitle: 'Signed in',
@@ -80,7 +80,7 @@ export const en: Translations = {
       signInIncompleteTitle: 'Sign-in incomplete',
       signInIncompleteMessage: 'The login window closed before authentication finished.',
       signInFailed: 'Sign-in failed',
-      signInToRemoteGateway: 'Sign in to remote gateway',
+      signInToRemoteGateway: 'Sign in to remote backend',
       signInWithProvider: provider => `Sign in with ${provider}`,
       identityProvider: 'your identity provider'
     }
@@ -98,8 +98,8 @@ export const en: Translations = {
     copyDetailFailed: 'Could not copy notification detail',
     backendOutOfDateTitle: 'Backend out of date',
     backendOutOfDateMessage:
-      'Your Hermes backend is older than this desktop build and may not work correctly. Update to align them.',
-    updateHermes: 'Update Hermes',
+      'Your LexEdge AI backend is older than this desktop build and may not work correctly. Update to align them.',
+    updateHermes: 'Update LexEdge AI',
     updateReadyTitle: 'Update ready',
     updateReadyMessage: count => `${count} new change${count === 1 ? '' : 's'} available.`,
     seeWhatsNew: "See what's new",
@@ -107,7 +107,7 @@ export const en: Translations = {
       elevenLabsNeedsKey: 'ElevenLabs STT needs ELEVENLABS_API_KEY.',
       elevenLabsRejectedKey: 'ElevenLabs rejected the API key (401).',
       methodNotAllowed:
-        'The desktop backend rejected that request (405 Method Not Allowed). Try restarting Hermes Desktop.',
+        'The desktop backend rejected that request (405 Method Not Allowed). Try restarting LexEdge AI.',
       microphonePermission: 'Microphone permission was denied.',
       openaiRejectedApiKey: 'OpenAI rejected the API key.',
       openaiRejectedApiKeyWithStatus: status => `OpenAI rejected the API key (${status} invalid_api_key).`,
@@ -334,7 +334,7 @@ export const en: Translations = {
       advanced: 'Advanced'
     },
     searchPlaceholder: {
-      about: 'About Hermes Desktop',
+      about: 'About LexEdge AI',
       config: 'Search settings...',
       gateway: 'Gateway connection...',
       keys: 'Search API keys...',
@@ -377,7 +377,7 @@ export const en: Translations = {
     fieldLabels: FIELD_LABELS,
     fieldDescriptions: FIELD_DESCRIPTIONS,
     about: {
-      heading: 'Hermes Desktop',
+      heading: 'LexEdge AI',
       version: value => `Version ${value}`,
       versionUnavailable: 'Version unavailable',
       updates: 'Updates',
@@ -385,6 +385,7 @@ export const en: Translations = {
       checking: 'Checking…',
       seeWhatsNew: "See what's new",
       releaseNotes: 'Release notes',
+      website: 'Website',
       onLatest: "You're on the latest version.",
       installing: 'An update is currently installing.',
       cantUpdate: "This build can't update itself from inside the app.",
@@ -439,13 +440,13 @@ export const en: Translations = {
       clear: 'Clear'
     },
     gateway: {
-      loading: 'Loading gateway settings...',
-      unavailableTitle: 'Gateway settings unavailable',
-      unavailableDesc: 'The desktop IPC bridge does not expose gateway settings.',
-      title: 'Gateway Connection',
+      loading: 'Loading backend connection settings...',
+      unavailableTitle: 'Backend connection settings unavailable',
+      unavailableDesc: 'The desktop IPC bridge does not expose backend connection settings.',
+      title: 'Backend Connection',
       envOverride: 'env override',
       intro:
-        'Hermes Desktop starts its own local gateway by default. Use a remote gateway when you want this app to control an already-running Hermes backend on another machine or behind a trusted proxy. Pick a profile below to give it its own remote host.',
+        'LexEdge AI starts its own local backend by default. Use a remote backend only when you want this app to control an already-running backend on another machine or behind a trusted proxy. Pick a profile below to give it its own remote host.',
       appliesTo: 'Applies to',
       allProfiles: 'All profiles',
       defaultConnection: 'Default connection for every profile that has no override of its own.',
@@ -454,15 +455,15 @@ export const en: Translations = {
       envOverrideTitle: 'Environment variables are controlling this desktop session.',
       envOverrideDesc:
         'Unset HERMES_DESKTOP_REMOTE_URL and HERMES_DESKTOP_REMOTE_TOKEN to use the saved setting below.',
-      localTitle: 'Local gateway',
-      localDesc: 'Start a private Hermes backend on localhost. This is the default and works offline.',
-      remoteTitle: 'Remote gateway',
+      localTitle: 'Local backend',
+      localDesc: 'Start a private LexEdge AI backend on localhost. This is the default and works offline.',
+      remoteTitle: 'Remote backend',
       remoteDesc:
-        'Connect this desktop shell to a remote Hermes backend. Hosted gateways use OAuth or a username and password; self-hosted ones may use a session token.',
+        'Connect this desktop shell to a remote LexEdge AI backend. Hosted backends use OAuth or a username and password; self-hosted ones may use a session token.',
       remoteUrlTitle: 'Remote URL',
       remoteUrlDesc: 'Base URL for the remote dashboard backend. Path prefixes are supported, for example /hermes.',
-      probing: 'Checking how this gateway authenticates…',
-      probeError: 'Could not reach this gateway yet. Check the URL — the auth method will appear once it responds.',
+      probing: 'Checking how this backend authenticates...',
+      probeError: 'Could not reach this backend yet. Check the URL; the auth method will appear once it responds.',
       signedIn: 'Signed in',
       signIn: 'Sign in',
       signOut: 'Sign out',
@@ -484,7 +485,7 @@ export const en: Translations = {
       diagnostics: 'Diagnostics',
       diagnosticsDesc: 'Reveal desktop.log in your file manager — useful when the gateway fails to start.',
       openLogs: 'Open logs',
-      incompleteTitle: 'Remote gateway incomplete',
+      incompleteTitle: 'Remote backend incomplete',
       incompleteSignIn: 'Enter a remote URL and sign in before switching to remote.',
       incompleteToken: 'Enter a remote URL and session token before switching to remote.',
       incompleteSignInTest: 'Enter a remote URL and sign in before testing.',
@@ -492,16 +493,16 @@ export const en: Translations = {
       enterUrlFirst: 'Enter a remote URL first.',
       restartingTitle: 'Gateway connection restarting',
       savedTitle: 'Gateway settings saved',
-      restartingMessage: 'Hermes Desktop will reconnect using the saved settings.',
+      restartingMessage: 'LexEdge AI will reconnect using the saved settings.',
       savedMessage: 'Saved for the next restart.',
       connectedTo: (baseUrl, version) => `Connected to ${baseUrl}${version ? ` · Hermes ${version}` : ''}`,
-      reachableTitle: 'Remote gateway reachable',
+      reachableTitle: 'Remote backend reachable',
       signedOutTitle: 'Signed out',
       signedOutMessage: 'Cleared the remote gateway session.',
       failedLoad: 'Gateway settings failed to load',
       signInFailed: 'Sign-in failed',
       signOutFailed: 'Sign-out failed',
-      testFailed: 'Remote gateway test failed',
+      testFailed: 'Remote backend test failed',
       applyFailed: 'Could not apply gateway settings',
       saveFailed: 'Could not save gateway settings'
     },
@@ -746,9 +747,9 @@ export const en: Translations = {
     },
     nav: {
       newChat: { title: 'New session', detail: 'Start a fresh session' },
-      settings: { title: 'Settings', detail: 'Configure Hermes desktop' },
+      settings: { title: 'Settings', detail: 'Configure LexEdge AI' },
       skills: { title: 'Skills & Tools', detail: 'Enable skills, toolsets, and providers' },
-      messaging: { title: 'Messaging', detail: 'Set up Telegram, Slack, Discord, and more' },
+      messaging: { title: 'Messaging', detail: 'Set up Telegram, WhatsApp, Slack, and email' },
       artifacts: { title: 'Artifacts', detail: 'Browse generated outputs' }
     },
     sectionEntries: {
@@ -768,10 +769,10 @@ export const en: Translations = {
     noSessions: 'No sessions yet.',
     gatewayRunning: 'Messaging gateway running',
     gatewayStopped: 'Messaging gateway stopped',
-    hermesActiveSessions: (version, count) => `Hermes ${version} · Active sessions ${count}`,
-    restartGateway: 'Restart gateway',
-    gatewayRestartFailed: 'Gateway restart failed.',
-    updateHermes: 'Update Hermes',
+    hermesActiveSessions: (version, count) => `LexEdge AI ${version} · Active sessions ${count}`,
+    restartGateway: 'Restart messaging',
+    gatewayRestartFailed: 'Messaging restart failed.',
+    updateHermes: 'Update LexEdge AI',
     actionRunning: 'running',
     actionDone: 'done',
     actionFailed: 'failed',
@@ -800,9 +801,13 @@ export const en: Translations = {
   },
 
   messaging: {
-    search: 'Search messaging...',
-    loading: 'Loading messaging platforms...',
+    search: 'Search client channels...',
+    loading: 'Loading messaging channels...',
     loadFailed: 'Messaging platforms failed to load',
+    pageTitle: 'Client channels',
+    pageIntro: 'Connect the channels lawyers use every day. Less common integrations stay under Advanced.',
+    commonChannels: 'Client channels',
+    moreChannels: count => `Advanced (${count})`,
     states: {
       connected: 'Connected',
       connecting: 'Connecting',
@@ -815,15 +820,15 @@ export const en: Translations = {
       startup_failed: 'Startup failed'
     },
     unknown: 'Unknown',
-    hintPendingRestart: 'Restart the gateway from the status bar to apply this change.',
-    hintGatewayStopped: 'Start the gateway from the status bar to connect.',
+    hintPendingRestart: 'Restart messaging from the status bar to apply this change.',
+    hintGatewayStopped: 'Start messaging from the status bar to connect.',
     credentialsSet: 'Credentials set',
     needsSetup: 'Needs setup',
     gatewayStopped: 'Messaging gateway stopped',
-    getCredentials: 'Get your credentials',
-    openSetupGuide: 'Open setup guide',
-    required: 'Required',
-    recommended: 'Recommended',
+    getCredentials: 'Connection details',
+    openSetupGuide: 'Open technical setup',
+    required: 'Required to connect',
+    recommended: 'Access control',
     advanced: count => `Advanced (${count})`,
     noTokenNeeded: 'This platform does not need a token here. Use the setup guide above, then enable it below.',
     enabled: 'Enabled',
@@ -832,6 +837,38 @@ export const en: Translations = {
     saving: 'Saving...',
     saveChanges: 'Save changes',
     saved: 'Saved',
+    channelOn: 'Channel enabled',
+    channelOff: 'Channel disabled',
+    sendApprovalDefault: 'Default legal posture: read messages and draft replies; send only after approval.',
+    legalSafetyTitle: 'Legal safety defaults',
+    legalSafetyItems: [
+      'Read incoming messages for context.',
+      'Draft replies for lawyer review.',
+      'Do not auto-send, file, serve, or dispatch.',
+      'Keep client access restricted with allowlists where possible.'
+    ],
+    simpleSetup: 'Simple setup',
+    connectBadge: 'Connect',
+    connectingBadge: 'Connecting...',
+    recommendedBadge: 'Recommended',
+    firmSetupBadge: 'Firm setup',
+    advancedBadge: 'Advanced',
+    whatsappPersonalTitle: 'Existing WhatsApp phone',
+    whatsappPersonalBody:
+      'Best for individual advocates. Use the local WhatsApp bridge and scan the QR code once. Keep sending approval on.',
+    whatsappBusinessTitle: 'WhatsApp Business Cloud API',
+    whatsappBusinessBody:
+      'Best for firms with a Meta Business account, official number, templates, and token management. Use the advanced WhatsApp Cloud channel.',
+    emailGmailTitle: 'Gmail / Google Workspace',
+    emailGmailBody:
+      'Connect with Google OAuth. LexEdge stores a local refresh token and uses Gmail IMAP/SMTP with OAuth approval.',
+    emailMicrosoftTitle: 'Microsoft 365 / Outlook',
+    emailMicrosoftBody:
+      'Use a dedicated mailbox. OAuth is preferred for firms; technical IMAP/SMTP setup remains below.',
+    emailOtherTitle: 'Other email',
+    emailOtherBody: 'Use only when Gmail/Microsoft are not available. You will need email, password, IMAP, and SMTP hosts.',
+    commonSetupBody: name =>
+      `${name} can be connected with the details below. Keep access limited to known client or firm accounts.`,
     replaceValue: 'Replace current value',
     openDocs: 'Open docs',
     clearField: key => `Clear ${key}`,
@@ -854,8 +891,8 @@ export const en: Translations = {
         placeholder: 'Paste Telegram bot token'
       },
       TELEGRAM_ALLOWED_USERS: {
-        label: 'Allowed Telegram user IDs',
-        help: 'Recommended. Comma-separated numeric IDs from @userinfobot. Without this, anyone can DM your bot.'
+        label: 'Allowed clients or staff',
+        help: 'Recommended. Comma-separated numeric Telegram user IDs from @userinfobot. Without this, anyone can DM your bot.'
       },
       TELEGRAM_PROXY: { label: 'Proxy URL', help: 'Only needed on networks where Telegram is blocked.' },
       DISCORD_BOT_TOKEN: {
@@ -899,6 +936,17 @@ export const en: Translations = {
         placeholder: 'Paste Slack app token'
       },
       SLACK_ALLOWED_USERS: { label: 'Allowed Slack user IDs', help: 'Recommended. Comma-separated Slack user IDs.' },
+      EMAIL_ADDRESS: { label: 'Mailbox address', help: 'Use a dedicated firm/client-intake mailbox.' },
+      EMAIL_PASSWORD: {
+        label: 'App password',
+        help: 'Use an app password or dedicated mailbox password. Avoid personal mailbox passwords.'
+      },
+      EMAIL_IMAP_HOST: { label: 'Incoming mail server', placeholder: 'imap.gmail.com' },
+      EMAIL_SMTP_HOST: { label: 'Outgoing mail server', placeholder: 'smtp.gmail.com' },
+      EMAIL_ALLOWED_USERS: {
+        label: 'Allowed sender addresses',
+        help: 'Recommended. Comma-separated client or firm email addresses that LexEdge may process.'
+      },
       MATTERMOST_URL: { label: 'Server URL', placeholder: 'https://mattermost.example.com' },
       MATTERMOST_TOKEN: { label: 'Bot token' },
       MATTERMOST_ALLOWED_USERS: {
@@ -925,11 +973,20 @@ export const en: Translations = {
       },
       WHATSAPP_MODE: { label: 'Bridge mode' },
       WHATSAPP_ALLOWED_USERS: {
-        label: 'Allowed WhatsApp users',
-        help: 'Recommended. Comma-separated phone numbers or WhatsApp IDs.'
+        label: 'Allowed WhatsApp clients or staff',
+        help: 'Recommended. Comma-separated phone numbers or WhatsApp IDs. Keeps unrelated chats out.'
       }
     },
-    platformIntro: {}
+    platformIntro: {
+      whatsapp:
+        'For most lawyers, start with the existing-phone setup. Scan the QR code once, restrict allowed numbers, and keep replies approval-only.',
+      email:
+        'Use a dedicated mailbox for client intake or matter updates. Gmail and Microsoft 365 should ideally use OAuth; this build currently supports technical mailbox fields below.',
+      telegram:
+        'Create a Telegram bot, allow only your own/client user IDs, and use it for intake or matter updates.',
+      slack:
+        'Use Slack mainly for internal firm review. Install a Slack app and restrict access to known workspace users.'
+    }
   },
 
   profiles: {
@@ -977,11 +1034,11 @@ export const en: Translations = {
     deleteDescMid: ' and remove its ',
     deleteDescSuffix: ' directory. This cannot be undone.',
     deleting: 'Deleting...',
-    createDesc: 'Profiles are independent Hermes environments: separate config, skills, and SOUL.md.',
+    createDesc: 'Practice workspaces keep each lawyer role separate: settings, skills, messaging, memory, and SOUL.md stay isolated.',
     nameLabel: 'Name',
     cloneFrom: 'Clone from',
     cloneFromNone: 'None (blank)',
-    cloneFromDesc: 'Copies config, skills, and SOUL.md from the selected source profile.',
+    cloneFromDesc: 'Copies settings, skills, and SOUL.md from the selected workspace. The practice role still adds its legal setup.',
     cloneFromDefault: 'Clone from default',
     cloneFromDefaultDesc: 'Copy config, skills, and SOUL.md from your default profile.',
     invalidName: hint => `Invalid name. ${hint}`,
@@ -1210,17 +1267,17 @@ export const en: Translations = {
   composer: {
     message: 'Message',
     wakingProfile: profile => `Waking up ${profile}…`,
-    placeholderStarting: 'Starting Hermes...',
-    placeholderReconnecting: 'Reconnecting to Hermes…',
+    placeholderStarting: 'Starting LexEdge AI...',
+    placeholderReconnecting: 'Reconnecting to LexEdge AI...',
     placeholderFollowUp: 'Send follow-up',
     newSessionPlaceholders: [
-      'What are we building?',
-      'Give Hermes a task',
-      "What's on your mind?",
-      'Describe what you need',
-      'What should we tackle?',
-      'Ask anything',
-      'Start with a goal'
+      'Ask about an Indian legal task',
+      'Draft or review a legal document',
+      'Check a limitation date',
+      'Prepare a GST reply',
+      'Review a PDF or document',
+      'Create a presentation',
+      'Start with a matter summary'
     ],
     followUpPlaceholders: [
       'Send a follow-up',
@@ -1362,22 +1419,22 @@ export const en: Translations = {
     checkFailedTitle: 'Couldn’t check for updates',
     tryAgain: 'Try again',
     notAvailableTitle: 'Update not available',
-    unsupportedMessage: 'This version of Hermes can’t update itself from inside the app.',
+    unsupportedMessage: 'This version of LexEdge AI can’t update itself from inside the app.',
     connectionRetry: 'Check your connection and try again.',
     latestBody: 'You’re running the latest version.',
     latestBodyBackend: 'The backend is running the latest version.',
     allSetTitle: 'You’re all set',
     availableTitle: 'New update available',
-    availableBody: 'A new version of Hermes is ready to install.',
+    availableBody: 'A new version of LexEdge AI is ready to install.',
     availableTitleBackend: 'Backend update available',
-    availableBodyBackend: 'A newer version of the connected Hermes backend is ready to install.',
+    availableBodyBackend: 'A newer version of the connected LexEdge AI backend is ready to install.',
     availableBodyNoChangelog: 'A newer version is ready. Release notes aren’t available for this install type.',
     updateNow: 'Update now',
     maybeLater: 'Maybe later',
     moreChanges: count => `+ ${count} more change${count === 1 ? '' : 's'} included.`,
     manualTitle: 'Update from your terminal',
-    manualBody: 'You installed Hermes from the command line, so updates run there too. Paste this into your terminal:',
-    manualPickedUp: 'Hermes will pick up the new version next time you launch it.',
+    manualBody: 'You installed LexEdge AI from the command line, so updates run there too. Paste this into your terminal:',
+    manualPickedUp: 'LexEdge AI will pick up the new version next time you launch it.',
     copy: 'Copy',
     copied: 'Copied',
     done: 'Done',
@@ -1580,7 +1637,7 @@ export const en: Translations = {
       update: 'update',
       updateInProgress: 'Update in progress',
       commitsBehind: (count, branch) => `${count} commit${count === 1 ? '' : 's'} behind ${branch}`,
-      desktopVersion: version => `Hermes Desktop v${version}`,
+      desktopVersion: version => `LexEdge AI v${version}`,
       backendVersion: version => `Backend v${version}`,
       clientLabel: version => `client v${version}`,
       backendLabel: version => `backend v${version}`,
@@ -1875,8 +1932,8 @@ export const en: Translations = {
     sessionExportFailed: 'Could not export session',
     imageSaved: 'Image saved',
     downloadStarted: 'Download started',
-    restartToUseSaveImage: 'Restart Hermes Desktop to use Save Image.',
-    restartToSaveImages: 'Restart Hermes Desktop to save images',
+    restartToUseSaveImage: 'Restart LexEdge AI to use Save Image.',
+    restartToSaveImages: 'Restart LexEdge AI to save images',
     imageDownloadFailed: 'Image download failed',
     openImage: 'Open image',
     downloadImage: 'Download image',

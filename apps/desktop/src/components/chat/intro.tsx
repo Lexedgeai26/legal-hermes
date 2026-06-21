@@ -1,4 +1,6 @@
-import { type CSSProperties, useState } from 'react'
+import { useState } from 'react'
+
+import { requestComposerInsert } from '@/app/chat/composer/focus'
 
 import introCopyJsonl from './intro-copy.jsonl?raw'
 
@@ -20,24 +22,24 @@ const NEUTRAL_PERSONALITIES = new Set(['', 'default', 'none', 'neutral'])
 
 const FALLBACK_COPY: IntroCopy[] = [
   {
-    headline: 'What are we moving today?',
-    body: "Send a bug, branch, plan, or rough idea. I'll inspect the repo and turn it into the next concrete step."
+    headline: 'How can LexEdge AI help?',
+    body: 'Ask about Indian legal research, notices, limitation dates, GST replies, PDFs, documents, or presentations.'
   },
   {
-    headline: "What's on your mind?",
-    body: "Bring the code, question, or stuck part. I'll read the room before making changes."
+    headline: 'What legal work should we prepare?',
+    body: 'Share the matter, document, or deadline. LexEdge AI will keep the workflow focused and practical.'
   },
   {
-    headline: 'What should Hermes look at?',
-    body: "Send the task, failing path, or half-formed plan. I'll help turn it into action."
+    headline: 'What should LexEdge AI review?',
+    body: 'Paste facts, upload documents, or describe the legal task. The assistant will help structure the next step.'
   },
   {
     headline: 'Where should we start?',
-    body: "Bring the problem, goal, or file. I'll inspect first and keep the next step concrete."
+    body: 'Bring the problem, goal, or file. LexEdge AI will inspect first and keep the next step concrete.'
   },
   {
     headline: 'What needs attention?',
-    body: "Send the context you have. I'll help sort it into a plan or a fix."
+    body: 'Send the context you have. LexEdge AI will help sort it into a legal workflow.'
   }
 ]
 
@@ -117,23 +119,23 @@ function fallbackCopyForPersonality(personalityKey: string): IntroCopy[] {
   return [
     {
       headline: `${label} mode is on. What should we work on?`,
-      body: "Send the task, file, or rough idea. I'll use your configured voice and keep the work grounded in this repo."
+      body: "Send the legal matter, document, deadline, or research question. I'll keep the workflow grounded in Indian legal review."
     },
     {
-      headline: `What does ${label} Hermes need to see?`,
-      body: "Bring the context or the stuck part. I'll adapt to your configured personality."
+      headline: `What does ${label} LexEdge AI need to see?`,
+      body: "Bring the facts, file, or notice. I'll adapt the style while keeping outputs review-ready."
     },
     {
       headline: `${label} mode is ready.`,
-      body: "Send the problem, file, or idea. I'll follow the personality you've configured."
+      body: "Send the legal task, document, or question. I'll follow the configured style without losing the legal workflow."
     },
     {
-      headline: `What should ${label} Hermes tackle?`,
-      body: "Drop the task here. I'll keep the work grounded in the repo."
+      headline: `What should ${label} LexEdge AI tackle?`,
+      body: 'Drop the matter context here. I will structure facts, issues, gaps, and next steps.'
     },
     {
       headline: 'Where should we begin?',
-      body: `Give me the context and I'll answer in ${label} mode.`
+      body: `Give me the legal context and I'll answer in ${label} mode for advocate review.`
     }
   ]
 }
@@ -142,7 +144,14 @@ function pickCopy(copies: IntroCopy[], seed = 0): IntroCopy {
   return copies[Math.abs(seed) % copies.length] || FALLBACK_COPY[0]
 }
 
-const WORDMARK = 'HERMES AGENT'
+const WORDMARK = 'LexEdge Personal AI Assistant'
+const START_EXAMPLES = [
+  'Review this legal notice and list risks, deadlines, and next steps.',
+  'Draft a reply to this GST show cause notice for advocate review.',
+  'Check limitation from these dates and explain the safest filing window.',
+  'Review this agreement for Indian law risks and suggest negotiation points.',
+  'Summarise this document for a client update with open questions.'
+]
 
 function resolveCopy(personality?: string, seed?: number): IntroCopy {
   const personalityKey = normalizeKey(personality)
@@ -157,25 +166,36 @@ function resolveCopy(personality?: string, seed?: number): IntroCopy {
 export function Intro({ personality, seed }: IntroProps) {
   const [mountSeed] = useState(() => Math.floor(Math.random() * 100000))
   const copy = resolveCopy(personality, mountSeed + (seed ?? 0))
+  const orderedExamples = START_EXAMPLES.map((_, index) => START_EXAMPLES[(index + mountSeed) % START_EXAMPLES.length])
+
+  const useExample = (example: string) => {
+    requestComposerInsert(example, { mode: 'block', target: 'main' })
+  }
 
   return (
     <div
-      className="pointer-events-none flex w-full min-w-0 flex-col items-center justify-center px-0.5 py-6 text-center text-muted-foreground sm:px-6 lg:px-8"
+      className="pointer-events-none flex w-full min-w-0 flex-col items-center justify-center px-0.5 py-6 text-center sm:px-6 lg:px-8"
       data-slot="aui_intro"
     >
       <div className="w-full min-w-0">
-        <p
-          aria-label={WORDMARK}
-          className="fit-text mx-auto mb-1 w-[calc(100%-1rem)] font-['Collapse'] font-bold uppercase leading-[0.9] tracking-[0.08em] text-midground mix-blend-plus-lighter dark:text-foreground/90"
-          style={{ '--fit-min': '2.75rem' } as CSSProperties}
-        >
-          <span>
-            <span>{WORDMARK}</span>
-          </span>
-          <span aria-hidden="true">{WORDMARK}</span>
+        <p className="mx-auto mb-2 max-w-3xl text-2xl font-medium leading-snug tracking-normal text-slate-700 sm:text-3xl">
+          {WORDMARK}
         </p>
 
-        <p className="m-0 text-center leading-normal tracking-tight">{copy.body}</p>
+        <p className="m-0 text-center leading-normal tracking-normal text-slate-700">{copy.body}</p>
+
+        <div className="pointer-events-auto mx-auto mt-6 grid w-full max-w-3xl gap-2 text-left sm:grid-cols-2">
+          {orderedExamples.map(example => (
+            <button
+              className="min-h-12 rounded-md border border-slate-400 bg-white/95 px-3 py-2 text-left text-sm font-semibold leading-snug text-slate-950 shadow-sm transition hover:border-slate-700 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-800"
+              key={example}
+              onClick={() => useExample(example)}
+              type="button"
+            >
+              {example}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

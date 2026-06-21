@@ -6,13 +6,40 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { createProfile, updateProfileSoul } from '@/hermes'
+import { createProfile, getPracticeRoleSoulTemplate, updateProfileSoul } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { AlertTriangle } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import type { ProfileInfo } from '@/types/hermes'
 
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
+const PRACTICE_ROLES = [
+  {
+    value: 'individual-advocate',
+    label: 'Individual Advocate',
+    description: 'Solo practice, notices, replies, limitation, document review, and client updates.'
+  },
+  {
+    value: 'litigation-lawyer',
+    label: 'Litigation Lawyer',
+    description: 'Court matters, hearing prep, pleadings, chronology, evidence, and orders.'
+  },
+  {
+    value: 'law-firm',
+    label: 'Law Firm',
+    description: 'Team workspace with conflict checks, matter intake, approval gates, and client confidentiality.'
+  },
+  {
+    value: 'in-house-counsel',
+    label: 'In-house Counsel',
+    description: 'Contract triage, risk flags, playbook routing, and business-facing legal updates.'
+  },
+  {
+    value: 'legal-consultant',
+    label: 'Legal Consultant',
+    description: 'Advisory memos, structuring options, legal research, and trade-off analysis.'
+  }
+] as const
 
 export function isValidProfileName(name: string): boolean {
   return PROFILE_NAME_RE.test(name.trim())
@@ -35,8 +62,10 @@ export function CreateProfileDialog({
   const { t } = useI18n()
   const p = t.profiles
   const [name, setName] = useState('')
+  const [practiceRole, setPracticeRole] = useState<string>('litigation-lawyer')
   const [cloneFrom, setCloneFrom] = useState<null | string>('default')
   const [soul, setSoul] = useState('')
+  const [loadingSoul, setLoadingSoul] = useState(false)
   const [status, setStatus] = useState<'done' | 'idle' | 'saving'>('idle')
   const [error, setError] = useState<null | string>(null)
 
@@ -46,11 +75,42 @@ export function CreateProfileDialog({
     }
 
     setName('')
+    setPracticeRole('litigation-lawyer')
     setCloneFrom('default')
     setSoul('')
+    setLoadingSoul(false)
     setError(null)
     setStatus('idle')
   }, [open])
+
+  useEffect(() => {
+    if (!open || !practiceRole) {
+      return
+    }
+
+    let cancelled = false
+    setLoadingSoul(true)
+    getPracticeRoleSoulTemplate(practiceRole)
+      .then(template => {
+        if (!cancelled) {
+          setSoul(template.content)
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : p.failedLoad)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingSoul(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, p.failedLoad, practiceRole])
 
   const trimmed = name.trim()
   const invalid = trimmed !== '' && !isValidProfileName(trimmed)
@@ -69,7 +129,7 @@ export function CreateProfileDialog({
     setError(null)
 
     try {
-      await createProfile({ name: trimmed, clone_from: cloneFrom })
+      await createProfile({ name: trimmed, clone_from: cloneFrom, practice_role: practiceRole })
 
       if (soul.trim()) {
         await updateProfileSoul(trimmed, soul)
@@ -111,6 +171,27 @@ export function CreateProfileDialog({
           </div>
 
           <div className="grid gap-1.5">
+            <label className="text-xs font-medium" htmlFor="new-profile-practice-role">
+              Practice workspace
+            </label>
+            <Select onValueChange={setPracticeRole} value={practiceRole}>
+              <SelectTrigger className="h-9 rounded-md" id="new-profile-practice-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRACTICE_ROLES.map(role => (
+                  <SelectItem key={role.value} value={role.value}>
+                    {role.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {PRACTICE_ROLES.find(role => role.value === practiceRole)?.description}
+            </p>
+          </div>
+
+          <div className="grid gap-1.5">
             <label className="text-xs font-medium" htmlFor="new-profile-clone-from">
               {p.cloneFrom}
             </label>
@@ -136,9 +217,14 @@ export function CreateProfileDialog({
             </label>
             <Textarea
               className="min-h-28 font-mono text-xs leading-5"
+              disabled={loadingSoul}
               id="new-profile-soul"
               onChange={event => setSoul(event.target.value)}
-              placeholder={p.soulPlaceholder(cloneFrom ? p.soulPlaceholderCloned : p.soulPlaceholderEmpty)}
+              placeholder={
+                loadingSoul
+                  ? 'Loading practice workspace SOUL...'
+                  : p.soulPlaceholder(cloneFrom ? p.soulPlaceholderCloned : p.soulPlaceholderEmpty)
+              }
               value={soul}
             />
           </div>

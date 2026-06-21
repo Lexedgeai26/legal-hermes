@@ -9,6 +9,7 @@ Usage:
     python -m hermes_cli.main web --port 8080
 """
 
+import contextlib
 from contextlib import asynccontextmanager, contextmanager
 
 import asyncio
@@ -705,6 +706,29 @@ class MessagingPlatformUpdate(BaseModel):
     clear_env: List[str] = []
     # Explicit body profile beats the query param injected by the global
     # dashboard profile switcher (same precedence as other scoped writes).
+    profile: Optional[str] = None
+
+
+class GmailOAuthConnectRequest(BaseModel):
+    email: Optional[str] = None
+    allowed_users: Optional[str] = None
+    profile: Optional[str] = None
+
+
+class WhatsAppPairStartRequest(BaseModel):
+    allowed_users: Optional[str] = None
+    mode: Optional[str] = "self-chat"
+    profile: Optional[str] = None
+    reset: bool = False
+
+
+class WhatsAppDisconnectRequest(BaseModel):
+    delete_session: bool = True
+    profile: Optional[str] = None
+
+
+class LegalAssistantSettingsUpdate(BaseModel):
+    settings: Dict[str, Any] = {}
     profile: Optional[str] = None
 
 
@@ -4357,10 +4381,16 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "description": "Talk to Hermes through an IMAP/SMTP mailbox.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/",
         "env_vars": (
+            "EMAIL_AUTH_MODE",
             "EMAIL_ADDRESS",
             "EMAIL_PASSWORD",
             "EMAIL_IMAP_HOST",
             "EMAIL_SMTP_HOST",
+            "EMAIL_ALLOWED_USERS",
+            "GMAIL_OAUTH_CLIENT_ID",
+            "GMAIL_OAUTH_CLIENT_SECRET",
+            "GMAIL_OAUTH_CLIENT_SECRET_FILE",
+            "GMAIL_OAUTH_TOKEN_FILE",
         ),
         "required_env": (
             "EMAIL_ADDRESS",
@@ -4541,6 +4571,11 @@ _MESSAGING_ENV_FALLBACKS: dict[str, dict[str, Any]] = {
         "description": "Email address to send and receive from",
         "prompt": "Email address",
     },
+    "EMAIL_AUTH_MODE": {
+        "description": "Email authentication mode. Use gmail_oauth for Gmail / Google Workspace.",
+        "prompt": "Email auth mode",
+        "advanced": True,
+    },
     "EMAIL_PASSWORD": {
         "description": "Email account password or app password",
         "prompt": "Email password",
@@ -4553,6 +4588,32 @@ _MESSAGING_ENV_FALLBACKS: dict[str, dict[str, Any]] = {
     "EMAIL_SMTP_HOST": {
         "description": "SMTP server host (e.g. smtp.gmail.com)",
         "prompt": "SMTP host",
+    },
+    "EMAIL_ALLOWED_USERS": {
+        "description": "Comma-separated client or firm email addresses allowed to use this mailbox",
+        "prompt": "Allowed sender addresses",
+    },
+    "GMAIL_OAUTH_CLIENT_ID": {
+        "description": "Google OAuth client ID used for Gmail sign-in",
+        "prompt": "Gmail OAuth client ID",
+        "password": True,
+        "advanced": True,
+    },
+    "GMAIL_OAUTH_CLIENT_SECRET": {
+        "description": "Google OAuth client secret, if your client has one",
+        "prompt": "Gmail OAuth client secret",
+        "password": True,
+        "advanced": True,
+    },
+    "GMAIL_OAUTH_CLIENT_SECRET_FILE": {
+        "description": "Path to the downloaded Google OAuth client JSON",
+        "prompt": "Gmail OAuth client JSON path",
+        "advanced": True,
+    },
+    "GMAIL_OAUTH_TOKEN_FILE": {
+        "description": "Local path where Gmail OAuth tokens are stored",
+        "prompt": "Gmail OAuth token file",
+        "advanced": True,
     },
     "TWILIO_ACCOUNT_SID": {
         "description": "Twilio Account SID",
@@ -4827,6 +4888,19 @@ def _messaging_platform_payload(
         get_running_pid() is not None
         or get_runtime_status_running_pid(runtime) is not None
     )
+    required_env = set(entry["required_env"])
+    gmail_oauth_connected = False
+    if platform_id == "email":
+        auth_mode = (env_on_disk.get("EMAIL_AUTH_MODE") or ("" if scoped else os.getenv("EMAIL_AUTH_MODE", ""))).strip().lower()
+        if auth_mode == "gmail_oauth":
+            try:
+                from hermes_cli.gmail_oauth import load_credentials
+                gmail_oauth_connected = bool(load_credentials())
+            except Exception:
+                gmail_oauth_connected = False
+            required_env.discard("EMAIL_PASSWORD")
+            required_env.update({"EMAIL_AUTH_MODE", "EMAIL_ADDRESS", "EMAIL_IMAP_HOST", "EMAIL_SMTP_HOST"})
+
     env_vars = []
 
     for key in entry["env_vars"]:
@@ -4838,7 +4912,7 @@ def _messaging_platform_payload(
         env_vars.append(
             {
                 "key": key,
-                "required": key in entry["required_env"],
+                "required": key in required_env,
                 "is_set": bool(value),
                 "redacted_value": redact_key(value) if value else None,
                 **_messaging_env_info(key),
@@ -4862,7 +4936,9 @@ def _messaging_platform_payload(
         except Exception:
             enabled = False
             home_channel = None
-        configured = all(env_on_disk.get(key) for key in entry["required_env"])
+        configured = all(env_on_disk.get(key) for key in required_env)
+        if platform_id == "email" and env_on_disk.get("EMAIL_AUTH_MODE", "").strip().lower() == "gmail_oauth":
+            configured = configured and gmail_oauth_connected
     else:
         try:
             gateway_config, platform, platform_config = _gateway_platform_config(
@@ -4873,6 +4949,10 @@ def _messaging_platform_payload(
                 platform_config
                 and gateway_config._is_platform_connected(platform, platform_config)
             )
+            if platform_id == "email":
+                auth_mode = (env_on_disk.get("EMAIL_AUTH_MODE") or os.getenv("EMAIL_AUTH_MODE", "")).strip().lower()
+                if auth_mode == "gmail_oauth":
+                    configured = all(env_on_disk.get(key) or os.getenv(key, "") for key in required_env) and gmail_oauth_connected
             home_channel = (
                 platform_config.home_channel.to_dict()
                 if platform_config and platform_config.home_channel
@@ -4882,8 +4962,10 @@ def _messaging_platform_payload(
             enabled = False
             configured = all(
                 env_on_disk.get(key) or os.getenv(key, "")
-                for key in entry["required_env"]
+                for key in required_env
             )
+            if platform_id == "email" and (env_on_disk.get("EMAIL_AUTH_MODE") or os.getenv("EMAIL_AUTH_MODE", "")).strip().lower() == "gmail_oauth":
+                configured = configured and gmail_oauth_connected
             home_channel = None
 
     state = (
@@ -5324,6 +5406,239 @@ async def cancel_telegram_onboarding(pairing_id: str):
     return {"ok": True}
 
 
+@dataclass
+class _WhatsAppPairing:
+    allowed_users: str
+    done_event: threading.Event
+    error: str
+    mode: str
+    proc: subprocess.Popen
+    qr: str
+    qr_event: threading.Event
+    session_dir: Path
+    started_at: float
+    status: str
+
+
+_whatsapp_pairings: dict[str, _WhatsAppPairing] = {}
+_whatsapp_pairings_lock = threading.RLock()
+
+
+def _whatsapp_session_dir() -> Path:
+    return get_hermes_home() / "whatsapp" / "session"
+
+
+def _whatsapp_bridge_dir() -> Path:
+    return PROJECT_ROOT / "scripts" / "whatsapp-bridge"
+
+
+def _whatsapp_finalize_pairing(record: _WhatsAppPairing) -> None:
+    save_env_value("WHATSAPP_MODE", record.mode)
+    if record.allowed_users:
+        save_env_value("WHATSAPP_ALLOWED_USERS", record.allowed_users)
+    save_env_value("WHATSAPP_ENABLED", "true")
+    _write_platform_enabled("whatsapp", True)
+
+
+def _whatsapp_pairing_reader(pairing_id: str, record: _WhatsAppPairing) -> None:
+    try:
+        assert record.proc.stdout is not None
+        for line in iter(record.proc.stdout.readline, ""):
+            text = line.strip()
+            if text.startswith("HERMES_WHATSAPP_QR "):
+                try:
+                    payload = json.loads(text.split(" ", 1)[1])
+                    record.qr = str(payload.get("qr") or "")
+                    if record.qr:
+                        record.status = "qr_ready"
+                        record.qr_event.set()
+                except Exception as exc:
+                    record.error = f"Could not parse WhatsApp QR: {exc}"
+                    record.status = "error"
+                    record.qr_event.set()
+            elif "Pairing complete" in text or "WhatsApp connected" in text:
+                record.status = "paired"
+                record.done_event.set()
+                record.qr_event.set()
+        return_code = record.proc.wait(timeout=5)
+        if (record.session_dir / "creds.json").exists():
+            record.status = "paired"
+            record.done_event.set()
+        elif record.status not in {"paired", "error"}:
+            record.status = "error"
+            record.error = f"WhatsApp pairing exited before credentials were saved ({return_code})."
+    except Exception as exc:
+        record.status = "error"
+        record.error = str(exc)
+    finally:
+        record.qr_event.set()
+        record.done_event.set()
+
+
+def _start_whatsapp_pairing_sync(body: WhatsAppPairStartRequest) -> dict[str, Any]:
+    mode = (body.mode or "self-chat").strip()
+    if mode not in {"self-chat", "bot"}:
+        raise HTTPException(status_code=400, detail="WhatsApp mode must be self-chat or bot.")
+
+    node = shutil.which("node")
+    npm = shutil.which("npm")
+    if not node:
+        raise HTTPException(status_code=400, detail="Node.js is required for WhatsApp pairing.")
+
+    bridge_dir = _whatsapp_bridge_dir()
+    bridge_script = bridge_dir / "bridge.js"
+    if not bridge_script.exists():
+        raise HTTPException(status_code=500, detail=f"WhatsApp bridge script missing at {bridge_script}.")
+
+    session_dir = _whatsapp_session_dir()
+    if body.reset and session_dir.exists():
+        shutil.rmtree(session_dir, ignore_errors=True)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    if (session_dir / "creds.json").exists() and not body.reset:
+        save_env_value("WHATSAPP_MODE", mode)
+        save_env_value("WHATSAPP_ENABLED", "true")
+        _write_platform_enabled("whatsapp", True)
+        return {"ok": True, "status": "paired", "paired": True, "qr": ""}
+
+    if not (bridge_dir / "node_modules").exists():
+        if not npm:
+            raise HTTPException(status_code=400, detail="npm is required to install WhatsApp bridge dependencies.")
+        install = subprocess.run(
+            [npm, "install", "--no-fund", "--no-audit", "--progress=false"],
+            cwd=str(bridge_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=300,
+        )
+        if install.returncode != 0:
+            detail = (install.stderr or "npm install failed").strip().splitlines()[-1]
+            raise HTTPException(status_code=500, detail=f"WhatsApp bridge install failed: {detail}")
+
+    env = os.environ.copy()
+    env["HERMES_WHATSAPP_QR_JSON"] = "1"
+    env["WHATSAPP_MODE"] = mode
+    allowed_users = (body.allowed_users or "").strip().replace(" ", "")
+    if allowed_users:
+        env["WHATSAPP_ALLOWED_USERS"] = allowed_users
+
+    proc = subprocess.Popen(
+        [node, str(bridge_script), "--pair-only", "--session", str(session_dir), "--mode", mode],
+        cwd=str(bridge_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    pairing_id = secrets.token_urlsafe(12)
+    record = _WhatsAppPairing(
+        allowed_users=allowed_users,
+        done_event=threading.Event(),
+        error="",
+        mode=mode,
+        proc=proc,
+        qr="",
+        qr_event=threading.Event(),
+        session_dir=session_dir,
+        started_at=time.time(),
+        status="starting",
+    )
+    with _whatsapp_pairings_lock:
+        _whatsapp_pairings[pairing_id] = record
+    threading.Thread(
+        target=_whatsapp_pairing_reader,
+        args=(pairing_id, record),
+        daemon=True,
+    ).start()
+
+    if not record.qr_event.wait(timeout=90):
+        record.status = "error"
+        record.error = "Timed out waiting for WhatsApp QR code."
+        with contextlib.suppress(Exception):
+            proc.terminate()
+        raise HTTPException(status_code=504, detail=record.error)
+
+    if record.status == "error":
+        raise HTTPException(status_code=500, detail=record.error or "WhatsApp pairing failed.")
+
+    if record.status == "paired":
+        _whatsapp_finalize_pairing(record)
+
+    return {
+        "ok": True,
+        "pairing_id": pairing_id,
+        "paired": record.status == "paired",
+        "qr": record.qr,
+        "status": record.status,
+    }
+
+
+@app.post("/api/messaging/platforms/whatsapp/pair/start")
+async def start_whatsapp_pairing(body: WhatsAppPairStartRequest, profile: Optional[str] = None):
+    effective_profile = body.profile or profile
+    with _profile_scope(effective_profile):
+        return await asyncio.to_thread(_start_whatsapp_pairing_sync, body)
+
+
+@app.get("/api/messaging/platforms/whatsapp/pair/{pairing_id}")
+async def get_whatsapp_pairing_status(pairing_id: str, profile: Optional[str] = None):
+    with _profile_scope(profile):
+        with _whatsapp_pairings_lock:
+            record = _whatsapp_pairings.get(pairing_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown WhatsApp pairing.")
+        if (record.session_dir / "creds.json").exists():
+            record.status = "paired"
+            _whatsapp_finalize_pairing(record)
+        return {
+            "ok": True,
+            "paired": record.status == "paired",
+            "qr": record.qr,
+            "status": record.status,
+            "error": record.error or None,
+        }
+
+
+@app.delete("/api/messaging/platforms/whatsapp/pair/{pairing_id}")
+async def cancel_whatsapp_pairing(pairing_id: str):
+    with _whatsapp_pairings_lock:
+        record = _whatsapp_pairings.pop(pairing_id, None)
+    if record and record.proc.poll() is None:
+        with contextlib.suppress(Exception):
+            record.proc.terminate()
+    return {"ok": True}
+
+
+@app.post("/api/messaging/platforms/whatsapp/disconnect")
+async def disconnect_whatsapp(body: WhatsAppDisconnectRequest, profile: Optional[str] = None):
+    effective_profile = body.profile or profile
+    with _profile_scope(effective_profile):
+        try:
+            remove_env_value("WHATSAPP_ENABLED")
+        except Exception:
+            pass
+
+        with _whatsapp_pairings_lock:
+            records = list(_whatsapp_pairings.values())
+            _whatsapp_pairings.clear()
+        for record in records:
+            if record.proc.poll() is None:
+                with contextlib.suppress(Exception):
+                    record.proc.terminate()
+
+        if body.delete_session:
+            shutil.rmtree(_whatsapp_session_dir(), ignore_errors=True)
+
+        try:
+            _write_platform_enabled("whatsapp", False)
+        except Exception:
+            pass
+
+    return {"ok": True, "platform": "whatsapp"}
+
+
 @app.get("/api/messaging/platforms")
 async def get_messaging_platforms(profile: Optional[str] = None):
     # Profile-scoped so the dashboard's global profile switcher shows the
@@ -5343,6 +5658,152 @@ async def get_messaging_platforms(profile: Optional[str] = None):
                 for entry in _messaging_platform_catalog()
             ]
         }
+
+
+_LEGAL_ASSISTANT_DEFAULTS: Dict[str, Any] = {
+    "identity": {
+        "assistant_name": "LexEdge Personal AI Assistant",
+        "firm_name": "LexEdge AI Labs Private Limited",
+        "default_jurisdiction": "India",
+        "default_court": "",
+        "signature_block": "",
+        "draft_disclaimer": "Draft for advocate review. Verify facts, law, limitation, citations, and forum rules before use.",
+        "welcome_message": (
+            "Hello. I am LexEdge AI, your Indian legal work assistant.\n\n"
+            "Send me a PDF, Word file, notice, order, contract, plaint, reply, email, image, or client facts.\n\n"
+            "You can ask me to summarise, draft a reply, find issues, create chronology, prepare checklist, "
+            "make a client update, open a draft in the editor, or export to Word/PDF.\n\n"
+            "I prepare drafts for advocate review. I do not file, serve, send, or take legal action without your approval."
+        ),
+    },
+    "practice_areas": {
+        "civil_litigation": True,
+        "criminal_litigation": True,
+        "gst_tax": True,
+        "section_138": True,
+        "ibc": True,
+        "sarfaesi": True,
+        "arbitration": True,
+        "contracts": True,
+        "employment": False,
+        "family_law": False,
+        "property": True,
+        "consumer": True,
+        "general_documentation": True,
+    },
+    "approval_rules": {
+        "draft_only": True,
+        "require_client_message_approval": True,
+        "allow_internal_whatsapp_replies": True,
+        "allow_email_draft_creation": True,
+        "allow_email_send_after_confirmation": False,
+        "require_confirmation_before_external_files": True,
+        "label_outputs_as_draft": True,
+    },
+    "channels": {
+        "whatsapp": {"enabled": False, "approval_only": True, "pause_replies": False},
+        "gmail": {"enabled": False, "draft_only": True, "read_inbox": False, "send_after_approval": False},
+        "slack": {"enabled": False, "approval_only": True},
+        "telegram": {"enabled": False, "approval_only": True},
+    },
+    "notifications": {
+        "draft_ready": True,
+        "limitation_reminder": True,
+        "hearing_reminder": True,
+        "client_update_draft_ready": True,
+        "missing_document_reminder": False,
+        "daily_matter_summary": False,
+        "weekly_work_summary": False,
+        "failed_channel_connection": True,
+        "approval_required": True,
+    },
+    "matter_defaults": {
+        "matter_number_format": "LEX-{YYYY}-{####}",
+        "default_folder": "",
+        "reminder_schedule": "09:00",
+        "client_update_format": "concise",
+    },
+    "privacy": {
+        "data_retention": "local",
+        "export_logs": False,
+    },
+}
+
+
+def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for key, value in base.items():
+        if isinstance(value, dict):
+            incoming = override.get(key) if isinstance(override.get(key), dict) else {}
+            result[key] = _deep_merge_dict(value, incoming)
+        else:
+            result[key] = override.get(key, value)
+    for key, value in override.items():
+        if key not in result:
+            result[key] = value
+    return result
+
+
+@app.get("/api/legal-assistant/settings")
+async def get_legal_assistant_settings(profile: Optional[str] = None):
+    try:
+        with _profile_scope(profile):
+            cfg = load_config() or {}
+            saved = cfg.get("legal_assistant") if isinstance(cfg.get("legal_assistant"), dict) else {}
+            return {
+                "settings": _deep_merge_dict(_LEGAL_ASSISTANT_DEFAULTS, saved),
+                "defaults": _LEGAL_ASSISTANT_DEFAULTS,
+            }
+    except Exception as exc:
+        _log.exception("GET /api/legal-assistant/settings failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.put("/api/legal-assistant/settings")
+async def update_legal_assistant_settings(body: LegalAssistantSettingsUpdate, profile: Optional[str] = None):
+    try:
+        with _profile_scope(body.profile or profile):
+            cfg = load_config() or {}
+            current = cfg.get("legal_assistant") if isinstance(cfg.get("legal_assistant"), dict) else {}
+            incoming = body.settings if isinstance(body.settings, dict) else {}
+            cfg["legal_assistant"] = _deep_merge_dict(_deep_merge_dict(_LEGAL_ASSISTANT_DEFAULTS, current), incoming)
+            save_config(cfg)
+            return {"ok": True, "settings": cfg["legal_assistant"]}
+    except Exception as exc:
+        _log.exception("PUT /api/legal-assistant/settings failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/messaging/platforms/email/gmail-oauth/connect")
+async def connect_gmail_oauth(body: GmailOAuthConnectRequest, profile: Optional[str] = None):
+    effective_profile = body.profile or profile
+    try:
+        with _profile_scope(effective_profile):
+            from hermes_cli.gmail_oauth import credentials_path, start_oauth_flow
+
+            creds = await asyncio.to_thread(start_oauth_flow, open_browser=True)
+            address = (body.email or creds.email or "").strip()
+            if not address:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Gmail connected, but Google did not return an email address. Enter the mailbox address and try again.",
+                )
+
+            save_env_value("EMAIL_AUTH_MODE", "gmail_oauth")
+            save_env_value("EMAIL_ADDRESS", address)
+            save_env_value("EMAIL_IMAP_HOST", "imap.gmail.com")
+            save_env_value("EMAIL_SMTP_HOST", "smtp.gmail.com")
+            save_env_value("GMAIL_OAUTH_TOKEN_FILE", str(credentials_path()))
+            if body.allowed_users is not None:
+                save_env_value("EMAIL_ALLOWED_USERS", body.allowed_users.strip())
+            _write_platform_enabled("email", True)
+
+        return {"ok": True, "platform": "email", "email": address}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("Gmail OAuth connect failed")
+        raise HTTPException(status_code=500, detail=str(exc) or "Gmail OAuth failed") from exc
 
 
 @app.put("/api/messaging/platforms/{platform_id}")
@@ -9502,6 +9963,7 @@ class ProfileCreate(BaseModel):
     clone_all: bool = False
     no_skills: bool = False
     description: Optional[str] = None
+    practice_role: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
     # Profile-builder additions — all optional, all applied best-effort AFTER
@@ -9546,6 +10008,143 @@ class ProfileDescribeAuto(BaseModel):
     overwrite: bool = False
 
 
+class OnboardingStepUpdate(BaseModel):
+    key: str
+    value: Any = True
+
+
+class OnboardingCompleteUpdate(BaseModel):
+    complete: bool = True
+
+
+_ONBOARDING_REQUIRED_STEPS = (
+    "practice_workspace",
+    "ai_model",
+    "model_test",
+    "legal_safety",
+)
+
+
+def _onboarding_state_path() -> Path:
+    return get_hermes_home() / "lexedge_onboarding.yaml"
+
+
+def _read_onboarding_state() -> Dict[str, Any]:
+    path = _onboarding_state_path()
+    if not path.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        _log.exception("Failed to read onboarding state from %s", path)
+        return {}
+
+
+def _write_onboarding_state(state: Dict[str, Any]) -> None:
+    path = _onboarding_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = dict(state)
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(yaml.safe_dump(state, sort_keys=True, allow_unicode=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _onboarding_profile_summary() -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    from hermes_cli import profiles as profiles_mod
+
+    try:
+        profiles = [_profile_to_dict(p) for p in profiles_mod.list_profiles()]
+    except Exception:
+        _log.exception("Onboarding profile scan failed; falling back to directory scan")
+        profiles = _fallback_profile_dicts(profiles_mod)
+
+    legal_profiles = [p for p in profiles if p.get("practice_role")]
+    preferred = None
+    state = _read_onboarding_state()
+    preferred_name = str(state.get("profile_name") or "").strip()
+    if preferred_name:
+        preferred = next((p for p in legal_profiles if p.get("name") == preferred_name), None)
+    if preferred is None and legal_profiles:
+        preferred = legal_profiles[0]
+    return preferred, profiles
+
+
+def _onboarding_model_configured() -> bool:
+    cfg = load_config() or {}
+    model_cfg = cfg.get("model") or {}
+    if not isinstance(model_cfg, dict):
+        return False
+    provider = str(model_cfg.get("provider") or "").strip()
+    model = str(model_cfg.get("model") or "").strip()
+    return bool(provider and model)
+
+
+def _onboarding_status_payload() -> Dict[str, Any]:
+    state = _read_onboarding_state()
+    profile, profiles = _onboarding_profile_summary()
+    step_state = state.get("steps") if isinstance(state.get("steps"), dict) else {}
+
+    steps = {
+        "practice_workspace": bool(profile),
+        "ai_model": bool(step_state.get("ai_model")) or _onboarding_model_configured(),
+        "model_test": bool(step_state.get("model_test")),
+        "legal_safety": bool(step_state.get("legal_safety")),
+    }
+    required_complete = all(steps.get(step) for step in _ONBOARDING_REQUIRED_STEPS)
+    completed = bool(state.get("completed")) and required_complete
+
+    return {
+        "completed": completed,
+        "required_complete": required_complete,
+        "steps": steps,
+        "profile": profile,
+        "profile_name": (profile or {}).get("name") or state.get("profile_name") or "",
+        "profiles": profiles,
+        "updated_at": state.get("updated_at"),
+    }
+
+
+@app.get("/api/onboarding/status")
+async def get_onboarding_status_endpoint():
+    try:
+        return _onboarding_status_payload()
+    except Exception as exc:
+        _log.exception("GET /api/onboarding/status failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/onboarding/step")
+async def update_onboarding_step_endpoint(body: OnboardingStepUpdate):
+    key = (body.key or "").strip()
+    if key not in _ONBOARDING_REQUIRED_STEPS and key not in {"profile_name"}:
+        raise HTTPException(status_code=400, detail=f"Unknown onboarding step: {key}")
+
+    state = _read_onboarding_state()
+    if key == "profile_name":
+        state["profile_name"] = str(body.value or "").strip()
+    else:
+        steps = state.setdefault("steps", {})
+        if not isinstance(steps, dict):
+            steps = {}
+            state["steps"] = steps
+        steps[key] = bool(body.value)
+    _write_onboarding_state(state)
+    return _onboarding_status_payload()
+
+
+@app.post("/api/onboarding/complete")
+async def complete_onboarding_endpoint(body: OnboardingCompleteUpdate):
+    status = _onboarding_status_payload()
+    if body.complete and not status.get("required_complete"):
+        raise HTTPException(status_code=400, detail="Complete the mandatory setup steps first.")
+    state = _read_onboarding_state()
+    state["completed"] = bool(body.complete)
+    _write_onboarding_state(state)
+    return _onboarding_status_payload()
+
+
 def _profile_attr(info, name: str, default: Any = None) -> Any:
     try:
         return getattr(info, name)
@@ -9565,6 +10164,8 @@ def _profile_to_dict(info) -> Dict[str, Any]:
         "gateway_running": bool(_profile_attr(info, "gateway_running", False)),
         "description": _profile_attr(info, "description", "") or "",
         "description_auto": bool(_profile_attr(info, "description_auto", False)),
+        "practice_role": _profile_attr(info, "practice_role", "") or "",
+        "practice_role_label": _profile_attr(info, "practice_role_label", "") or "",
         "distribution_name": _profile_attr(info, "distribution_name"),
         "distribution_version": _profile_attr(info, "distribution_version"),
         "distribution_source": _profile_attr(info, "distribution_source"),
@@ -9594,6 +10195,8 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
             "gateway_running": _safe(lambda: profiles_mod._check_gateway_running(default_home), False),
             "description": _safe(lambda: profiles_mod.read_profile_meta(default_home).get("description", ""), ""),
             "description_auto": _safe(lambda: profiles_mod.read_profile_meta(default_home).get("description_auto", False), False),
+            "practice_role": _safe(lambda: profiles_mod.read_profile_meta(default_home).get("practice_role", ""), ""),
+            "practice_role_label": _safe(lambda: profiles_mod.read_profile_meta(default_home).get("practice_role_label", ""), ""),
             "distribution_name": None,
             "distribution_version": None,
             "distribution_source": None,
@@ -9617,6 +10220,8 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
                 "gateway_running": _safe(lambda entry=entry: profiles_mod._check_gateway_running(entry), False),
                 "description": _safe(lambda entry=entry: profiles_mod.read_profile_meta(entry).get("description", ""), ""),
                 "description_auto": _safe(lambda entry=entry: profiles_mod.read_profile_meta(entry).get("description_auto", False), False),
+                "practice_role": _safe(lambda entry=entry: profiles_mod.read_profile_meta(entry).get("practice_role", ""), ""),
+                "practice_role_label": _safe(lambda entry=entry: profiles_mod.read_profile_meta(entry).get("practice_role_label", ""), ""),
                 "distribution_name": None,
                 "distribution_version": None,
                 "distribution_source": None,
@@ -9768,6 +10373,24 @@ async def list_profiles_endpoint():
         return {"profiles": _fallback_profile_dicts(profiles_mod)}
 
 
+@app.get("/api/profiles/practice-roles/{role}/soul-template")
+async def get_practice_role_soul_template(role: str):
+    try:
+        from hermes_cli.legal_practice_profiles import build_practice_role_soul, get_practice_role
+
+        resolved = get_practice_role(role)
+        return {
+            "content": build_practice_role_soul(resolved.key),
+            "practice_role": resolved.key,
+            "practice_role_label": resolved.label,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _log.exception("GET /api/profiles/practice-roles/%s/soul-template failed", role)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/profiles")
 async def create_profile_endpoint(body: ProfileCreate):
     from hermes_cli import profiles as profiles_mod
@@ -9796,6 +10419,7 @@ async def create_profile_endpoint(body: ProfileCreate):
             clone_config=clone_config,
             no_skills=body.no_skills,
             description=body.description,
+            practice_role=body.practice_role,
         )
         # Match the CLI's profile-create flow: fresh named profiles get the
         # bundled skills installed. When cloning from default, create_profile()
@@ -9874,6 +10498,7 @@ async def create_profile_endpoint(body: ProfileCreate):
         "ok": True,
         "name": body.name,
         "path": str(path),
+        "practice_role": body.practice_role or "",
         "model_set": model_set,
         "mcp_written": mcp_written,
         "skills_disabled": skills_disabled,

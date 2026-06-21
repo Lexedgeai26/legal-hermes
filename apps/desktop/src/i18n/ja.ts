@@ -507,6 +507,7 @@ export const ja = defineLocale({
       checking: '確認中…',
       seeWhatsNew: '新機能を見る',
       releaseNotes: 'リリースノート',
+      website: 'Website',
       onLatest: '最新バージョンです。',
       installing: '更新をインストール中です。',
       cantUpdate: 'このビルドはアプリ内から更新できません。',
@@ -923,6 +924,10 @@ export const ja = defineLocale({
     search: 'メッセージングを検索...',
     loading: 'メッセージングプラットフォームを読み込み中...',
     loadFailed: 'メッセージングプラットフォームの読み込みに失敗しました',
+    pageTitle: 'Client channels',
+    pageIntro: 'Connect the channels lawyers use every day. Less common integrations stay under Advanced.',
+    commonChannels: 'よく使う',
+    moreChannels: count => `その他 (${count})`,
     states: {
       connected: '接続済み',
       connecting: '接続中',
@@ -953,6 +958,38 @@ export const ja = defineLocale({
     saving: '保存中...',
     saveChanges: '変更を保存',
     saved: '保存しました',
+    channelOn: 'Channel enabled',
+    channelOff: 'Channel disabled',
+    sendApprovalDefault: 'Default legal posture: read messages and draft replies; send only after approval.',
+    legalSafetyTitle: 'Legal safety defaults',
+    legalSafetyItems: [
+      'Read incoming messages for context.',
+      'Draft replies for lawyer review.',
+      'Do not auto-send, file, serve, or dispatch.',
+      'Keep client access restricted with allowlists where possible.'
+    ],
+    simpleSetup: 'Simple setup',
+    connectBadge: 'Connect',
+    connectingBadge: 'Connecting...',
+    recommendedBadge: 'Recommended',
+    firmSetupBadge: 'Firm setup',
+    advancedBadge: 'Advanced',
+    whatsappPersonalTitle: 'Existing WhatsApp phone',
+    whatsappPersonalBody:
+      'Best for individual advocates. Use the local WhatsApp bridge and scan the QR code once. Keep sending approval on.',
+    whatsappBusinessTitle: 'WhatsApp Business Cloud API',
+    whatsappBusinessBody:
+      'Best for firms with a Meta Business account, official number, templates, and token management. Use the advanced WhatsApp Cloud channel.',
+    emailGmailTitle: 'Gmail / Google Workspace',
+    emailGmailBody:
+      'Connect with Google OAuth. LexEdge stores a local refresh token and uses Gmail IMAP/SMTP with OAuth approval.',
+    emailMicrosoftTitle: 'Microsoft 365 / Outlook',
+    emailMicrosoftBody:
+      'Use a dedicated mailbox. OAuth is preferred for firms; technical IMAP/SMTP setup remains below.',
+    emailOtherTitle: 'Other email',
+    emailOtherBody: 'Use only when Gmail/Microsoft are not available. You will need email, password, IMAP, and SMTP hosts.',
+    commonSetupBody: name =>
+      `${name} can be connected with the details below. Keep access limited to known client or firm accounts.`,
     replaceValue: '現在の値を置き換え',
     openDocs: 'ドキュメントを開く',
     clearField: key => `${key} をクリア`,

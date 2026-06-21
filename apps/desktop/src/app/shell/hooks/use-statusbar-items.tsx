@@ -50,6 +50,8 @@ import type { StatusResponse } from '@/types/hermes'
 import { CRON_ROUTE } from '../../routes'
 import type { StatusbarItem, StatusbarSelectModifiers } from '../statusbar-controls'
 
+const HERMES_REPO_URL = 'https://github.com/NousResearch/hermes-agent'
+
 interface StatusbarItemsOptions {
   agentsOpen: boolean
   chatOpen: boolean
@@ -419,6 +421,14 @@ export function useStatusbarItems({
         id: 'terminal',
         onSelect: () => setTerminalTakeover(!$terminalTakeover.get()),
         title: terminalTakeover ? copy.hideTerminal : copy.showTerminal,
+        variant: 'action'
+      },
+      {
+        hidden: !chatOpen,
+        id: 'upstream-credit',
+        label: 'Powered by Hermes',
+        onSelect: () => void window.hermesDesktop?.openExternal?.(HERMES_REPO_URL),
+        title: 'Hermes Agent by Nous Research · Copyright (c) 2025 Nous Research',
         variant: 'action'
       },
       clientVersionItem,

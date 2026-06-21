@@ -151,7 +151,7 @@ gateway:
     set:                   "⊙ Goal set ({budget}-turn budget): {goal}\nI'll keep working until the goal is done, you pause/clear it, or the budget is exhausted.\nControls: /goal status · /goal pause · /goal resume · /goal clear"
 
   help:
-    header:                "📖 **Hermes Commands**\n"
+    header:                "📖 **LexEdge Personal AI Assistant Commands**\n"
     skill_header:          "\n⚡ **Skill Commands** ({count} active):"
     more_use_commands:     "\n... and {count} more. Use `/commands` for the full paginated list."
 
@@ -267,10 +267,10 @@ gateway:
 
   set_home:
     save_failed:           "Failed to save home channel: {error}"
-    success:               "✅ Home channel set to **{name}** (ID: {chat_id}).\nCron jobs and cross-platform messages will be delivered here."
+    success:               "✅ This chat is now your LexEdge AI home channel.\n\nI will send reminders, deadline alerts, draft updates, and scheduled legal summaries here.\nYou can change this anytime from Settings > Messaging."
 
   status:
-    header:                "📊 **Hermes Gateway Status**"
+    header:                "📊 **LexEdge Personal AI Assistant Status**"
     matrix_scope_header:   "**Matrix scope:**"
     matrix_scope_room:     "  room: {room}"
     matrix_scope_room_id:  "  room_id: {room_id}"

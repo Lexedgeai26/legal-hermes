@@ -495,6 +495,7 @@ export const zhHant = defineLocale({
       checking: '檢查中…',
       seeWhatsNew: '查看新增內容',
       releaseNotes: '發行說明',
+      website: 'Website',
       onLatest: '你已是最新版本。',
       installing: '正在安裝更新。',
       cantUpdate: '此版本無法從應用程式內自行更新。',
@@ -895,6 +896,10 @@ export const zhHant = defineLocale({
     search: '搜尋訊息平台…',
     loading: '正在載入訊息平台…',
     loadFailed: '訊息平台載入失敗',
+    pageTitle: 'Client channels',
+    pageIntro: 'Connect the channels lawyers use every day. Less common integrations stay under Advanced.',
+    commonChannels: '常用',
+    moreChannels: count => `更多（${count}）`,
     states: {
       connected: '已連線',
       connecting: '連線中',
@@ -924,6 +929,38 @@ export const zhHant = defineLocale({
     saving: '儲存中…',
     saveChanges: '儲存變更',
     saved: '已儲存',
+    channelOn: 'Channel enabled',
+    channelOff: 'Channel disabled',
+    sendApprovalDefault: 'Default legal posture: read messages and draft replies; send only after approval.',
+    legalSafetyTitle: 'Legal safety defaults',
+    legalSafetyItems: [
+      'Read incoming messages for context.',
+      'Draft replies for lawyer review.',
+      'Do not auto-send, file, serve, or dispatch.',
+      'Keep client access restricted with allowlists where possible.'
+    ],
+    simpleSetup: 'Simple setup',
+    connectBadge: 'Connect',
+    connectingBadge: 'Connecting...',
+    recommendedBadge: 'Recommended',
+    firmSetupBadge: 'Firm setup',
+    advancedBadge: 'Advanced',
+    whatsappPersonalTitle: 'Existing WhatsApp phone',
+    whatsappPersonalBody:
+      'Best for individual advocates. Use the local WhatsApp bridge and scan the QR code once. Keep sending approval on.',
+    whatsappBusinessTitle: 'WhatsApp Business Cloud API',
+    whatsappBusinessBody:
+      'Best for firms with a Meta Business account, official number, templates, and token management. Use the advanced WhatsApp Cloud channel.',
+    emailGmailTitle: 'Gmail / Google Workspace',
+    emailGmailBody:
+      'Connect with Google OAuth. LexEdge stores a local refresh token and uses Gmail IMAP/SMTP with OAuth approval.',
+    emailMicrosoftTitle: 'Microsoft 365 / Outlook',
+    emailMicrosoftBody:
+      'Use a dedicated mailbox. OAuth is preferred for firms; technical IMAP/SMTP setup remains below.',
+    emailOtherTitle: 'Other email',
+    emailOtherBody: 'Use only when Gmail/Microsoft are not available. You will need email, password, IMAP, and SMTP hosts.',
+    commonSetupBody: name =>
+      `${name} can be connected with the details below. Keep access limited to known client or firm accounts.`,
     replaceValue: '取代目前值',
     openDocs: '開啟文件',
     clearField: key => `清除 ${key}`,

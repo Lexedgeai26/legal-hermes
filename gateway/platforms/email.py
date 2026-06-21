@@ -16,6 +16,7 @@ Environment variables:
 """
 
 import asyncio
+import base64
 import email as email_lib
 import imaplib
 import logging
@@ -159,10 +160,17 @@ def _is_automated_sender(address: str, headers: dict) -> bool:
     
 def check_email_requirements() -> bool:
     """Check if email platform dependencies are available."""
+    auth_mode = os.getenv("EMAIL_AUTH_MODE", "").strip().lower()
     addr = os.getenv("EMAIL_ADDRESS")
-    pwd = os.getenv("EMAIL_PASSWORD")
     imap = os.getenv("EMAIL_IMAP_HOST")
     smtp = os.getenv("EMAIL_SMTP_HOST")
+    if auth_mode == "gmail_oauth":
+        try:
+            from hermes_cli.gmail_oauth import load_credentials
+            return bool(addr and imap and smtp and load_credentials())
+        except Exception:
+            return False
+    pwd = os.getenv("EMAIL_PASSWORD")
     if not all([addr, pwd, imap, smtp]):
         return False
     return True
@@ -308,6 +316,7 @@ class EmailAdapter(BasePlatformAdapter):
 
         self._address = os.getenv("EMAIL_ADDRESS", "")
         self._password = os.getenv("EMAIL_PASSWORD", "")
+        self._auth_mode = os.getenv("EMAIL_AUTH_MODE", "").strip().lower()
         self._imap_host = os.getenv("EMAIL_IMAP_HOST", "")
         self._imap_port = int(os.getenv("EMAIL_IMAP_PORT", "993"))
         self._smtp_host = os.getenv("EMAIL_SMTP_HOST", "")
@@ -330,6 +339,30 @@ class EmailAdapter(BasePlatformAdapter):
         self._thread_context: Dict[str, Dict[str, str]] = {}
 
         logger.info("[Email] Adapter initialized for %s", self._address)
+
+    def _gmail_access_token(self) -> str:
+        from hermes_cli.gmail_oauth import get_valid_access_token
+
+        return get_valid_access_token()
+
+    def _login_imap(self, imap: "imaplib.IMAP4") -> None:
+        if self._auth_mode == "gmail_oauth":
+            token = self._gmail_access_token()
+            auth = f"user={self._address}\x01auth=Bearer {token}\x01\x01"
+            imap.authenticate("XOAUTH2", lambda _: auth.encode("utf-8"))
+            return
+        imap.login(self._address, self._password)
+
+    def _login_smtp(self, smtp: smtplib.SMTP) -> None:
+        if self._auth_mode == "gmail_oauth":
+            token = self._gmail_access_token()
+            auth = f"user={self._address}\x01auth=Bearer {token}\x01\x01"
+            encoded = base64.b64encode(auth.encode("utf-8")).decode("ascii")
+            code, response = smtp.docmd("AUTH", "XOAUTH2 " + encoded)
+            if code != 235:
+                raise smtplib.SMTPAuthenticationError(code, response)
+            return
+        smtp.login(self._address, self._password)
 
     def _trim_seen_uids(self) -> None:
         """Keep only the most recent UIDs to prevent unbounded memory growth.
@@ -398,7 +431,7 @@ class EmailAdapter(BasePlatformAdapter):
         try:
             # Test IMAP connection
             imap = imaplib.IMAP4_SSL(self._imap_host, self._imap_port, timeout=30)
-            imap.login(self._address, self._password)
+            self._login_imap(imap)
             _send_imap_id(imap)
             # Mark all existing messages as seen so we only process new ones
             imap.select("INBOX")
@@ -418,7 +451,7 @@ class EmailAdapter(BasePlatformAdapter):
             # Test SMTP connection
             smtp = self._connect_smtp()
             try:
-                smtp.login(self._address, self._password)
+                self._login_smtp(smtp)
             finally:
                 smtp.quit()
             logger.info("[Email] SMTP connection test passed.")
@@ -468,7 +501,7 @@ class EmailAdapter(BasePlatformAdapter):
         try:
             imap = imaplib.IMAP4_SSL(self._imap_host, self._imap_port, timeout=30)
             try:
-                imap.login(self._address, self._password)
+                self._login_imap(imap)
                 _send_imap_id(imap)
                 imap.select("INBOX")
 
@@ -639,7 +672,7 @@ class EmailAdapter(BasePlatformAdapter):
 
         # Thread context for reply
         ctx = self._thread_context.get(to_addr, {})
-        subject = ctx.get("subject", "Hermes Agent")
+        subject = ctx.get("subject", "LexEdge Personal AI Assistant")
         if not subject.startswith("Re:"):
             subject = f"Re: {subject}"
         msg["Subject"] = subject
@@ -658,7 +691,7 @@ class EmailAdapter(BasePlatformAdapter):
 
         smtp = self._connect_smtp()
         try:
-            smtp.login(self._address, self._password)
+            self._login_smtp(smtp)
             smtp.send_message(msg)
         finally:
             try:
@@ -753,7 +786,7 @@ class EmailAdapter(BasePlatformAdapter):
         msg["To"] = to_addr
 
         ctx = self._thread_context.get(to_addr, {})
-        subject = ctx.get("subject", "Hermes Agent")
+        subject = ctx.get("subject", "LexEdge Personal AI Assistant")
         if not subject.startswith("Re:"):
             subject = f"Re: {subject}"
         msg["Subject"] = subject
@@ -784,7 +817,7 @@ class EmailAdapter(BasePlatformAdapter):
 
         smtp = self._connect_smtp()
         try:
-            smtp.login(self._address, self._password)
+            self._login_smtp(smtp)
             smtp.send_message(msg)
         finally:
             try:
@@ -833,7 +866,7 @@ class EmailAdapter(BasePlatformAdapter):
         msg["To"] = to_addr
 
         ctx = self._thread_context.get(to_addr, {})
-        subject = ctx.get("subject", "Hermes Agent")
+        subject = ctx.get("subject", "LexEdge Personal AI Assistant")
         if not subject.startswith("Re:"):
             subject = f"Re: {subject}"
         msg["Subject"] = subject
@@ -862,7 +895,7 @@ class EmailAdapter(BasePlatformAdapter):
 
         smtp = self._connect_smtp()
         try:
-            smtp.login(self._address, self._password)
+            self._login_smtp(smtp)
             smtp.send_message(msg)
         finally:
             try:

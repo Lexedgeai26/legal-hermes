@@ -104,6 +104,7 @@ import { useKeybinds } from './hooks/use-keybinds'
 import { SIDEBAR_COLLAPSE_MEDIA_QUERY } from './layout-constants'
 import { ModelPickerOverlay } from './model-picker-overlay'
 import { ModelVisibilityOverlay } from './model-visibility-overlay'
+import { LawyerOnboardingWizard } from './onboarding/lawyer-onboarding-wizard'
 import { RightSidebarPane } from './right-sidebar'
 import { $terminalTakeover } from './right-sidebar/store'
 import { PersistentTerminal, TerminalSlot } from './right-sidebar/terminal/persistent'
@@ -959,6 +960,17 @@ export function DesktopController() {
     <>
       <RemoteDisplayBanner />
       {!isSecondaryWindow() && <DesktopInstallOverlay />}
+      {!isSecondaryWindow() && (
+        <LawyerOnboardingWizard
+          enabled={gatewayState === 'open'}
+          onCompleted={() => {
+            void refreshActiveProfile()
+            void refreshHermesConfig()
+            void refreshCurrentModel()
+            void queryClient.invalidateQueries({ queryKey: ['model-options'] })
+          }}
+        />
+      )}
       {!isSecondaryWindow() && (
         <DesktopOnboardingOverlay
           enabled={gatewayState === 'open'}

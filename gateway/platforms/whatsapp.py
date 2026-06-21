@@ -978,12 +978,31 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 ) as resp:
                     if resp.status == 200:
                         messages = await resp.json()
+                        if messages:
+                            logger.info(
+                                "[%s] bridge returned %d WhatsApp message(s)",
+                                self.name,
+                                len(messages),
+                            )
                         for msg_data in messages:
                             event = await self._build_message_event(msg_data)
                             if event:
+                                logger.info(
+                                    "[%s] WhatsApp event built: id=%s type=%s chat=%s user=%s",
+                                    self.name,
+                                    event.message_id,
+                                    event.message_type.value,
+                                    event.source.chat_id,
+                                    event.source.user_id,
+                                )
                                 if event.message_type == MessageType.TEXT:
                                     self._enqueue_text_event(event)
                                 else:
+                                    logger.info(
+                                        "[%s] dispatching non-text WhatsApp event: id=%s",
+                                        self.name,
+                                        event.message_id,
+                                    )
                                     await self.handle_message(event)
             except asyncio.CancelledError:
                 break
@@ -1018,6 +1037,13 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         period before dispatching the combined message.
         """
         key = self._text_batch_key(event)
+        logger.info(
+            "[%s] queueing WhatsApp text batch: key=%s id=%s chars=%d",
+            self.name,
+            key,
+            event.message_id,
+            len(event.text or ""),
+        )
         existing = self._pending_text_batches.get(key)
         chunk_len = len(event.text or "")
         if existing is None:
@@ -1052,6 +1078,13 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             event = self._pending_text_batches.pop(key, None)
             if not event:
                 return
+            logger.info(
+                "[%s] flushing WhatsApp text batch: key=%s id=%s chars=%d",
+                self.name,
+                key,
+                event.message_id,
+                len(event.text or ""),
+            )
             await self.handle_message(event)
         finally:
             if self._pending_text_batch_tasks.get(key) is current_task:
@@ -1061,6 +1094,14 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         """Build a MessageEvent from bridge message data, downloading images to cache."""
         try:
             if not self._should_process_message(data):
+                logger.info(
+                    "[%s] WhatsApp message skipped by policy: id=%s chat=%s sender=%s group=%s",
+                    self.name,
+                    data.get("messageId"),
+                    data.get("chatId"),
+                    data.get("senderId") or data.get("from"),
+                    data.get("isGroup", False),
+                )
                 return None
 
             # Determine message type

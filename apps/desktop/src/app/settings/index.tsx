@@ -5,7 +5,7 @@ import { Tip } from '@/components/ui/tooltip'
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { Archive, Bell, Globe, Info, KeyRound, Settings2, Sparkles, Wrench, Zap } from '@/lib/icons'
+import { Archive, Bell, Globe, Info, KeyRound, MessageCircle, Settings2, Sparkles, Wrench, Zap } from '@/lib/icons'
 import { notifyError } from '@/store/notifications'
 
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
@@ -19,6 +19,7 @@ import { ConfigSettings } from './config-settings'
 import { SECTIONS } from './constants'
 import { GatewaySettings } from './gateway-settings'
 import { KEYS_VIEWS, KeysSettings, type KeysView } from './keys-settings'
+import { LegalAssistantSettingsView } from './legal-assistant-settings'
 import { McpSettings } from './mcp-settings'
 import { NotificationsSettings } from './notifications-settings'
 import { PROVIDER_VIEWS, ProvidersSettings, type ProviderView } from './providers-settings'
@@ -28,6 +29,7 @@ import type { SettingsPageProps, SettingsView as SettingsViewId } from './types'
 const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   ...SECTIONS.map(s => `config:${s.id}` as SettingsViewId),
   'providers',
+  'legal-assistant',
   'gateway',
   'keys',
   'mcp',
@@ -108,6 +110,12 @@ export function SettingsView({ gateway, onClose, onConfigSaved, onMainModelChang
             icon={Bell}
             label={t.settings.nav.notifications}
             onClick={() => setActiveView('notifications')}
+          />
+          <OverlayNavItem
+            active={activeView === 'legal-assistant'}
+            icon={MessageCircle}
+            label="Legal Assistant"
+            onClick={() => setActiveView('legal-assistant')}
           />
           <div className="my-2 h-px bg-border/30" />
           <OverlayNavItem
@@ -216,6 +224,8 @@ export function SettingsView({ gateway, onClose, onConfigSaved, onMainModelChang
         <OverlayMain className="px-0 pb-0 pt-[calc(var(--titlebar-height)+1rem)]">
           {activeView === 'config:appearance' ? (
             <AppearanceSettings />
+          ) : activeView === 'legal-assistant' ? (
+            <LegalAssistantSettingsView />
           ) : activeView === 'about' ? (
             <AboutSettings />
           ) : activeView === 'gateway' ? (

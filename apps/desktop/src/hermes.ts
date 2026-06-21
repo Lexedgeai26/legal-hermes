@@ -14,9 +14,12 @@ import type {
   CronJobUpdates,
   ElevenLabsVoicesResponse,
   EnvVarInfo,
+  GmailOAuthConnectResponse,
   HermesConfig,
   HermesConfigRecord,
   LogsResponse,
+  LegalAssistantSettings,
+  LegalAssistantSettingsResponse,
   MemoryProviderConfig,
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
@@ -25,11 +28,13 @@ import type {
   ModelAssignmentResponse,
   ModelInfoResponse,
   ModelOptionsResponse,
+  OnboardingStatus,
   OAuthPollResponse,
   OAuthProvidersResponse,
   OAuthStartResponse,
   OAuthSubmitResponse,
   PaginatedSessions,
+  PracticeRoleSoulTemplate,
   ProfileCreatePayload,
   ProfileSetupCommand,
   ProfileSoul,
@@ -40,7 +45,8 @@ import type {
   SkillInfo,
   StatusResponse,
   ToolsetConfig,
-  ToolsetInfo
+  ToolsetInfo,
+  WhatsAppPairingResponse
 } from '@/types/hermes'
 
 const DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS = 30_000
@@ -68,10 +74,13 @@ export type {
   ElevenLabsVoice,
   ElevenLabsVoicesResponse,
   EnvVarInfo,
+  GmailOAuthConnectResponse,
   GatewayReadyPayload,
   HermesConfig,
   HermesConfigRecord,
   LogsResponse,
+  LegalAssistantSettings,
+  LegalAssistantSettingsResponse,
   MemoryProviderConfig,
   MessagingEnvVarInfo,
   MessagingHomeChannel,
@@ -84,7 +93,9 @@ export type {
   ModelInfoResponse,
   ModelOptionProvider,
   ModelOptionsResponse,
+  OnboardingStatus,
   PaginatedSessions,
+  PracticeRoleSoulTemplate,
   ProfileCreatePayload,
   ProfileInfo,
   ProfileSetupCommand,
@@ -103,7 +114,8 @@ export type {
   StaleAuxAssignment,
   StatusResponse,
   ToolsetConfig,
-  ToolsetInfo
+  ToolsetInfo,
+  WhatsAppPairingResponse
 } from '@/types/hermes'
 
 export class HermesGateway extends JsonRpcGatewayClient {
@@ -540,6 +552,70 @@ export function testMessagingPlatform(platformId: string): Promise<MessagingPlat
   })
 }
 
+export function connectGmailOAuth(body: { allowed_users?: string; email?: string } = {}): Promise<GmailOAuthConnectResponse> {
+  return window.hermesDesktop.api<GmailOAuthConnectResponse>({
+    ...profileScoped(),
+    path: '/api/messaging/platforms/email/gmail-oauth/connect',
+    method: 'POST',
+    body,
+    timeoutMs: 300000
+  })
+}
+
+export function startWhatsAppPairing(
+  body: { allowed_users?: string; mode?: 'bot' | 'self-chat'; reset?: boolean } = {}
+): Promise<WhatsAppPairingResponse> {
+  return window.hermesDesktop.api<WhatsAppPairingResponse>({
+    ...profileScoped(),
+    path: '/api/messaging/platforms/whatsapp/pair/start',
+    method: 'POST',
+    body,
+    timeoutMs: 300000
+  })
+}
+
+export function getWhatsAppPairing(pairingId: string): Promise<WhatsAppPairingResponse> {
+  return window.hermesDesktop.api<WhatsAppPairingResponse>({
+    ...profileScoped(),
+    path: `/api/messaging/platforms/whatsapp/pair/${encodeURIComponent(pairingId)}`
+  })
+}
+
+export function cancelWhatsAppPairing(pairingId: string): Promise<{ ok: boolean }> {
+  return window.hermesDesktop.api<{ ok: boolean }>({
+    ...profileScoped(),
+    path: `/api/messaging/platforms/whatsapp/pair/${encodeURIComponent(pairingId)}`,
+    method: 'DELETE'
+  })
+}
+
+export function disconnectWhatsApp(body: { delete_session?: boolean } = { delete_session: true }): Promise<{ ok: boolean }> {
+  return window.hermesDesktop.api<{ ok: boolean }>({
+    ...profileScoped(),
+    path: '/api/messaging/platforms/whatsapp/disconnect',
+    method: 'POST',
+    body
+  })
+}
+
+export function getLegalAssistantSettings(): Promise<LegalAssistantSettingsResponse> {
+  return window.hermesDesktop.api<LegalAssistantSettingsResponse>({
+    ...profileScoped(),
+    path: '/api/legal-assistant/settings'
+  })
+}
+
+export function updateLegalAssistantSettings(
+  settings: LegalAssistantSettings
+): Promise<{ ok: boolean; settings: LegalAssistantSettings }> {
+  return window.hermesDesktop.api<{ ok: boolean; settings: LegalAssistantSettings }>({
+    ...profileScoped(),
+    path: '/api/legal-assistant/settings',
+    method: 'PUT',
+    body: { settings }
+  })
+}
+
 export function getCronJobs(): Promise<CronJob[]> {
   return window.hermesDesktop.api<CronJob[]>({
     path: '/api/cron/jobs'
@@ -639,6 +715,12 @@ export function getProfileSoul(name: string): Promise<ProfileSoul> {
   })
 }
 
+export function getPracticeRoleSoulTemplate(role: string): Promise<PracticeRoleSoulTemplate> {
+  return window.hermesDesktop.api<PracticeRoleSoulTemplate>({
+    path: `/api/profiles/practice-roles/${encodeURIComponent(role)}/soul-template`
+  })
+}
+
 export function updateProfileSoul(name: string, content: string): Promise<{ ok: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean }>({
     path: `/api/profiles/${encodeURIComponent(name)}/soul`,
@@ -697,6 +779,28 @@ export function setGlobalModel(
       provider,
       model
     }
+  })
+}
+
+export function getOnboardingStatus(): Promise<OnboardingStatus> {
+  return window.hermesDesktop.api<OnboardingStatus>({
+    path: '/api/onboarding/status'
+  })
+}
+
+export function updateOnboardingStep(key: string, value: unknown = true): Promise<OnboardingStatus> {
+  return window.hermesDesktop.api<OnboardingStatus>({
+    path: '/api/onboarding/step',
+    method: 'POST',
+    body: { key, value }
+  })
+}
+
+export function completeOnboarding(complete = true): Promise<OnboardingStatus> {
+  return window.hermesDesktop.api<OnboardingStatus>({
+    path: '/api/onboarding/complete',
+    method: 'POST',
+    body: { complete }
   })
 }
 

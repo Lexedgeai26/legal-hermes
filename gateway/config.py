@@ -1642,7 +1642,15 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     email_pwd = os.getenv("EMAIL_PASSWORD")
     email_imap = os.getenv("EMAIL_IMAP_HOST")
     email_smtp = os.getenv("EMAIL_SMTP_HOST")
-    if all([email_addr, email_pwd, email_imap, email_smtp]):
+    email_auth_mode = os.getenv("EMAIL_AUTH_MODE", "").strip().lower()
+    email_has_auth = bool(email_pwd)
+    if email_auth_mode == "gmail_oauth":
+        try:
+            from hermes_cli.gmail_oauth import load_credentials
+            email_has_auth = bool(load_credentials())
+        except Exception:
+            email_has_auth = False
+    if all([email_addr, email_has_auth, email_imap, email_smtp]):
         if Platform.EMAIL not in config.platforms:
             config.platforms[Platform.EMAIL] = PlatformConfig()
         config.platforms[Platform.EMAIL].enabled = True

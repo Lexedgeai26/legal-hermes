@@ -1,4 +1,12 @@
+# OS/editor noise
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python/runtime environments
 /venv/
 /venv.old/
 /_pycache/
@@ -6,14 +14,28 @@
 __pycache__/
 .venv/
 .venv
-.vscode/
+
+# Local environment and credentials
 .env
+.env.*
+!.env.example
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 .env.development
 .env.test
+client_secret*.json
+credentials*.json
+credential*.json
+token*.json
+*oauth*.json
+*secret*.json
+*.key
+*.p8
+*.p12
+*.crt
+*.csr
 .hermes-docker/
 .notebooklm-home/
 .notebooklm-cli-venv/
@@ -41,6 +63,10 @@ run_datagen_sonnet.sh
 source-data/*
 run_datagen_megascience_glm4-6.sh
 data/*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 node_modules/
 browser-use/
 agent-browser/
@@ -69,6 +95,8 @@ apps/desktop/build/
 apps/desktop/dist/
 apps/desktop/release/
 apps/desktop/*.tsbuildinfo
+*.asar
+*.asar.unpacked/
 
 # Web UI assets — synced from @nous-research/ui at build time via
 # `npm run sync-assets` (see web/package.json).

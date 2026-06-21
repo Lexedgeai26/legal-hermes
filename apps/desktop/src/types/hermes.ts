@@ -195,6 +195,28 @@ export interface MessagingPlatformTestResponse {
   state?: null | string
 }
 
+export type LegalAssistantSettings = Record<string, unknown>
+
+export interface LegalAssistantSettingsResponse {
+  defaults: LegalAssistantSettings
+  settings: LegalAssistantSettings
+}
+
+export interface GmailOAuthConnectResponse {
+  email: string
+  ok: boolean
+  platform: 'email'
+}
+
+export interface WhatsAppPairingResponse {
+  error?: null | string
+  ok: boolean
+  paired: boolean
+  pairing_id?: string
+  qr?: string
+  status: string
+}
+
 export interface GatewayReadyPayload {
   skin?: unknown
 }
@@ -510,6 +532,7 @@ export interface ProfileCreatePayload {
   clone_from_default?: boolean
   name: string
   no_skills?: boolean
+  practice_role?: null | string
 }
 
 export interface ProfileInfo {
@@ -518,6 +541,8 @@ export interface ProfileInfo {
   model: null | string
   name: string
   path: string
+  practice_role?: string
+  practice_role_label?: string
   provider: null | string
   skill_count: number
 }
@@ -529,6 +554,27 @@ export interface ProfileSetupCommand {
 export interface ProfileSoul {
   content: string
   exists: boolean
+}
+
+export interface PracticeRoleSoulTemplate {
+  content: string
+  practice_role: string
+  practice_role_label: string
+}
+
+export interface OnboardingStatus {
+  completed: boolean
+  profile?: null | ProfileInfo
+  profile_name: string
+  profiles: ProfileInfo[]
+  required_complete: boolean
+  steps: {
+    ai_model: boolean
+    legal_safety: boolean
+    model_test: boolean
+    practice_workspace: boolean
+  }
+  updated_at?: null | string
 }
 
 export interface ProfilesResponse {

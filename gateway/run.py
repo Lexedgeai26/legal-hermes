@@ -30,6 +30,7 @@ import inspect
 import json
 import logging
 import os
+import random
 import re
 import shlex
 import site
@@ -67,6 +68,19 @@ _AGENT_CACHE_IDLE_TTL_SECS = 3600.0  # evict agents idle for >1h
 _PLATFORM_CONNECT_TIMEOUT_SECS_DEFAULT = 30.0
 _ADAPTER_DISCONNECT_TIMEOUT_SECS_DEFAULT = 5.0
 _TELEGRAM_COMMAND_MENTION_RE = re.compile(r"(?<![\w:/])/([A-Za-z0-9][A-Za-z0-9_-]*)")
+
+_LEXEDGE_WHATSAPP_PROCESSING_MESSAGES = (
+    "LexEdge Personal AI Assistant is reviewing your message and preparing a careful draft.",
+    "LexEdge Personal AI Assistant has received this. I am checking the facts and legal context now.",
+    "LexEdge Personal AI Assistant is working on it. I will share a draft for advocate review shortly.",
+    "LexEdge Personal AI Assistant is analysing the document or issue. Please keep this chat open.",
+    "LexEdge Personal AI Assistant is extracting key facts, dates, and next steps before replying.",
+    "LexEdge Personal AI Assistant is preparing a lawyer-review draft. This may take a little time.",
+    "LexEdge Personal AI Assistant is reading your instruction and checking for deadlines or missing details.",
+    "LexEdge Personal AI Assistant is processing this legal task. I will respond with review-ready points.",
+    "LexEdge Personal AI Assistant is preparing a structured reply for your review.",
+    "LexEdge Personal AI Assistant has started work on this. I will keep the response draft-only and review-safe.",
+)
 
 _TELEGRAM_NOISY_STATUS_RE = re.compile(
     r"("  # transient/auxiliary status that should stay in logs, not Telegram chat
@@ -9354,11 +9368,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     else "/sethome"
                 )
                 notice = (
-                    f"📬 No home channel is set for {platform_name.title()}. "
-                    f"A home channel is where Hermes delivers cron job results "
-                    f"and cross-platform messages.\n\n"
-                    f"Type {sethome_cmd} to make this chat your home channel, "
-                    f"or ignore to skip."
+                    f"Set this {platform_name.title()} chat as your LexEdge AI home channel?\n\n"
+                    "This lets LexEdge send reminders, limitation alerts, draft completion updates, "
+                    "and scheduled legal work summaries here.\n\n"
+                    f"Reply {sethome_cmd} to enable it, or ignore this message to skip."
                 )
                 await self._deliver_platform_notice(source, notice)
         
@@ -9985,8 +9998,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         )
             except Exception:
                 logger.debug("Failed to persist inbound user message after agent exception", exc_info=True)
-            error_type = type(e).__name__
-            error_detail = str(e)[:300] if str(e) else "no details available"
             status_hint = ""
             status_code = getattr(e, "status_code", None)
             _hist_len = len(history) if 'history' in locals() else 0
@@ -10029,11 +10040,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     )
                 elif status_code == 400:
                     status_hint = " The request was rejected by the API."
+            if status_hint:
+                return f"LexEdge Personal AI Assistant could not complete this reply.{status_hint}"
             return (
-                f"Sorry, I encountered an error ({error_type}).\n"
-                f"{error_detail}\n"
-                f"{status_hint}"
-                "Try again or use /reset to start a fresh session."
+                "LexEdge Personal AI Assistant could not complete this reply.\n\n"
+                "Please try again in a moment. If it happens again, restart messaging from the desktop app."
             )
         finally:
             # Restore session context variables to their pre-handler state
@@ -14276,6 +14287,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         This is run in a thread pool to not block the event loop.
         Supports interruption via new messages.
         """
+        if source.platform == Platform.WHATSAPP:
+            adapter = self.adapters.get(source.platform)
+            if adapter and source.chat_id:
+                try:
+                    ack = random.choice(_LEXEDGE_WHATSAPP_PROCESSING_MESSAGES)
+                    metadata = _non_conversational_metadata(
+                        self._thread_metadata_for_source(source, event_message_id),
+                        platform=source.platform,
+                    )
+                    await adapter.send(source.chat_id, ack, metadata=metadata)
+                except Exception as exc:
+                    logger.debug("WhatsApp immediate LexEdge acknowledgement failed: %s", exc)
+
         # ---- Proxy mode: delegate to remote API server ----
         if self._get_proxy_url():
             return await self._run_agent_via_proxy(
@@ -14349,7 +14373,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         progress_grouping = resolve_display_setting(user_config, platform_key, "tool_progress_grouping") or "accumulate"
         # Disable tool progress for webhooks - they don't support message editing,
         # so each progress line would be sent as a separate message.
-        from gateway.config import Platform
         tool_progress_enabled = progress_mode != "off" and source.platform != Platform.WEBHOOK
         # Natural assistant status messages are intentionally independent from
         # tool progress and token streaming. Users can keep tool_progress quiet
@@ -16260,7 +16283,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _status_detail = " — " + ", ".join(_parts)
                     except Exception:
                         pass
-                _heartbeat_text = f"⏳ Working — {_elapsed_mins} min{_status_detail}"
+                if source.platform == Platform.WHATSAPP:
+                    _heartbeat_text = (
+                        f"{random.choice(_LEXEDGE_WHATSAPP_PROCESSING_MESSAGES)}\n\n"
+                        f"Still preparing your reply ({_elapsed_mins} min{_status_detail})."
+                    )
+                else:
+                    _heartbeat_text = f"⏳ Working — {_elapsed_mins} min{_status_detail}"
                 try:
                     _notify_res = None
                     if _heartbeat_msg_id:

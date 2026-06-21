@@ -5018,7 +5018,10 @@ def _desktop_packaged_executable(desktop_dir: Path) -> Optional[Path]:
     """Return the current platform's unpacked Electron app executable."""
     release_dir = desktop_dir / "release"
     if sys.platform == "darwin":
-        candidates = list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
+        candidates = (
+            list(release_dir.glob("mac*/LexEdge AI.app/Contents/MacOS/LexEdge AI"))
+            + list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
+        )
     elif sys.platform == "win32":
         candidates = [
             release_dir / "win-unpacked" / "Hermes.exe",
@@ -5340,7 +5343,7 @@ def _desktop_macos_relaunchable_fixup(desktop_dir: Path) -> None:
     exe = _desktop_packaged_executable(desktop_dir)
     if exe is None:
         return
-    # exe = .../Hermes.app/Contents/MacOS/Hermes  ->  app bundle = .../Hermes.app
+    # exe = .../*.app/Contents/MacOS/<binary>  ->  app bundle = .../*.app
     app = exe.parents[2]
     if not str(app).endswith(".app") or not app.is_dir():
         return
@@ -10266,8 +10269,15 @@ def cmd_profile(args):
                 no_alias=no_alias,
                 no_skills=no_skills,
                 description=getattr(args, "description", None),
+                practice_role=getattr(args, "practice_role", None),
             )
             print(f"\nProfile '{name}' created at {profile_dir}")
+            if getattr(args, "practice_role", None):
+                from hermes_cli.legal_practice_profiles import get_practice_role
+                role = get_practice_role(getattr(args, "practice_role"))
+                print(f"Practice role: {role.label}")
+                if role.skill_names:
+                    print(f"Role skills installed: {', '.join(role.skill_names)}")
 
             if clone_config or clone_all:
                 source_label = (

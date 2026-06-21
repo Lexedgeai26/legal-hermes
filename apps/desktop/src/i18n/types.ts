@@ -282,6 +282,7 @@ export interface Translations {
       checking: string
       seeWhatsNew: string
       releaseNotes: string
+      website: string
       onLatest: string
       installing: string
       cantUpdate: string
@@ -666,6 +667,10 @@ export interface Translations {
     search: string
     loading: string
     loadFailed: string
+    pageTitle: string
+    pageIntro: string
+    commonChannels: string
+    moreChannels: (count: number) => string
     states: Record<string, string>
     unknown: string
     hintPendingRestart: string
@@ -685,6 +690,28 @@ export interface Translations {
     saving: string
     saveChanges: string
     saved: string
+    channelOn: string
+    channelOff: string
+    sendApprovalDefault: string
+    legalSafetyTitle: string
+    legalSafetyItems: string[]
+    simpleSetup: string
+    connectBadge: string
+    connectingBadge: string
+    recommendedBadge: string
+    firmSetupBadge: string
+    advancedBadge: string
+    whatsappPersonalTitle: string
+    whatsappPersonalBody: string
+    whatsappBusinessTitle: string
+    whatsappBusinessBody: string
+    emailGmailTitle: string
+    emailGmailBody: string
+    emailMicrosoftTitle: string
+    emailMicrosoftBody: string
+    emailOtherTitle: string
+    emailOtherBody: string
+    commonSetupBody: (name: string) => string
     replaceValue: string
     openDocs: string
     clearField: (key: string) => string

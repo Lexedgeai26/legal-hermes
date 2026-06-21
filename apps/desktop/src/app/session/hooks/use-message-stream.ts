@@ -79,6 +79,20 @@ interface QueuedStreamDeltas {
   reasoning: string
 }
 
+function userFacingTurnError(message: string): string {
+  const technical =
+    /\bTraceback\b/i.test(message) ||
+    /\b[A-Za-z_][A-Za-z0-9_]*Error\b/.test(message) ||
+    /unexpected keyword argument/i.test(message) ||
+    /\b[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\(/.test(message)
+
+  if (!technical) {
+    return message
+  }
+
+  return 'LexEdge Personal AI Assistant could not complete this reply. Please try again; if it repeats, open logs and share them with support.'
+}
+
 type SessionRuntimeStatePatch = Partial<
   Pick<
     ClientSessionState,
@@ -1120,8 +1134,10 @@ export function useMessageStream({
           compactedTurnRef.current.delete(sessionId)
         }
 
+        const visibleErrorMessage = userFacingTurnError(errorMessage)
+
         dispatchNativeNotification({
-          body: errorMessage,
+          body: visibleErrorMessage,
           kind: 'turnError',
           sessionId,
           title: translateNow('notifications.native.turnErrorTitle')
@@ -1135,16 +1151,16 @@ export function useMessageStream({
           // inline error alone is too easy to miss. The stable id collapses the
           // same error from multiple blocked threads into one toast.
           notify({
-            id: `gateway-error:${errorMessage}`,
+            id: `gateway-error:${visibleErrorMessage}`,
             kind: 'error',
-            title: 'Hermes error',
-            message: errorMessage
+            title: 'LexEdge could not complete that action',
+            message: visibleErrorMessage
           })
         }
 
         if (sessionId) {
           flushQueuedDeltas(sessionId)
-          failAssistantMessage(sessionId, errorMessage)
+          failAssistantMessage(sessionId, visibleErrorMessage)
         }
 
         if (isActiveEvent) {
