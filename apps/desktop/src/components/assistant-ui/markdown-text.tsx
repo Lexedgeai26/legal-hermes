@@ -7,6 +7,7 @@ import {
   StreamdownTextPrimitive,
   type SyntaxHighlighterProps
 } from '@assistant-ui/react-streamdown'
+import { useStore } from '@nanostores/react'
 import { code } from '@streamdown/code'
 import {
   type ComponentProps,
@@ -39,6 +40,7 @@ import {
 import { previewDisplayLabel, previewMarkdownHref, previewTargetFromMarkdownHref } from '@/lib/preview-targets'
 import { tailBoundedRemend } from '@/lib/remend-tail'
 import { cn } from '@/lib/utils'
+import { $composerAttachments } from '@/store/composer'
 
 // Math rendering plugin (KaTeX). Configured once at module scope — the
 // plugin is stateless beyond its internal cache so re-creating per-render
@@ -459,9 +461,34 @@ const MARKDOWN_CONTAINER_CLASS_NAME = cn(
 )
 
 const MAX_MARKDOWN_CHARS = 200_000
-const LOCAL_MARKDOWN_DRAFT_RE = /(^|[\s(["'`])((?:\/[^\n\r]+?\.(?:md|markdown)))(?=$|[\s)"'`,.])/gi
+const ABSOLUTE_MARKDOWN_DRAFT_RE = /(^|[\s(["'`])((?:\/[^\n\r]+?\.(?:md|markdown)))(?=$|[\s)"'`,.])/gi
+const RELATIVE_MARKDOWN_DRAFT_RE = /(^|[\s(["'`:])((?!\/)(?!https?:\/\/)[A-Za-z0-9][A-Za-z0-9._ -]*\.(?:md|markdown))(?=$|[\s)"'`,.])/gi
 
-function appendDraftArtifactPreviewCards(markdown: string): string {
+function activeMatterFolderFromAttachments() {
+  const matter = $composerAttachments.get().find(attachment => attachment.id.startsWith('matter:'))
+
+  if (!matter) {
+    return ''
+  }
+
+  if (matter.path) {
+    return matter.path
+  }
+
+  const contextFolder = /^Folder:\s*(.+)$/im.exec(matter.contextText || '')?.[1]?.trim()
+  if (contextFolder) {
+    return contextFolder
+  }
+
+  const detailFolder = /\d+\s+files\s+·\s+(.+)$/i.exec(matter.detail || '')?.[1]?.trim()
+  return detailFolder || ''
+}
+
+function joinMatterPath(folder: string, fileName: string) {
+  return `${folder.replace(/\/+$/, '')}/${fileName.replace(/^\.?\//, '')}`
+}
+
+function appendDraftArtifactPreviewCards(markdown: string, matterFolder = ''): string {
   if (!/\.(?:md|markdown)\b/i.test(markdown) || markdown.includes('#preview/')) {
     return markdown
   }
@@ -480,12 +507,24 @@ function appendDraftArtifactPreviewCards(markdown: string): string {
       continue
     }
 
-    for (const match of line.matchAll(LOCAL_MARKDOWN_DRAFT_RE)) {
+    for (const match of line.matchAll(ABSOLUTE_MARKDOWN_DRAFT_RE)) {
       const target = match[2].trim()
 
       if (!seen.has(target)) {
         seen.add(target)
         targets.push(target)
+      }
+    }
+
+    if (matterFolder) {
+      for (const match of line.matchAll(RELATIVE_MARKDOWN_DRAFT_RE)) {
+        const fileName = match[2].trim()
+        const target = joinMatterPath(matterFolder, fileName)
+
+        if (!seen.has(target)) {
+          seen.add(target)
+          targets.push(target)
+        }
       }
     }
   }
@@ -528,8 +567,10 @@ function HugeTextFallback({ containerClassName, text }: { containerClassName?: s
 
 function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTextSurfaceProps) {
   const { status, text } = useMessagePartText()
+  useStore($composerAttachments)
   const isStreaming = status.type === 'running'
-  const displayText = useMemo(() => appendDraftArtifactPreviewCards(text), [text])
+  const matterFolder = activeMatterFolderFromAttachments()
+  const displayText = useMemo(() => appendDraftArtifactPreviewCards(text, matterFolder), [matterFolder, text])
 
   // Keep code parsing enabled while streaming so incomplete fenced blocks still
   // render as code cards. The expensive Shiki pass is deferred by
@@ -649,7 +690,7 @@ function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTex
       parseIncompleteMarkdown={false}
       parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocksCached}
       plugins={plugins}
-      preprocess={value => preprocessWithTailRepair(appendDraftArtifactPreviewCards(value))}
+      preprocess={value => preprocessWithTailRepair(appendDraftArtifactPreviewCards(value, matterFolder))}
     />
   )
 }

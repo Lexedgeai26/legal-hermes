@@ -350,6 +350,7 @@ function addMatterAttachment(matter: MatterRecord) {
     label: `Matter: ${matter.name}`,
     detail: `${matter.file_count} files · ${matter.folder_path}`,
     contextText: matterPrompt(matter, 'Use this matter for my next instruction. Wait for my specific task.'),
+    path: matter.folder_path,
     persistent: true
   })
 }

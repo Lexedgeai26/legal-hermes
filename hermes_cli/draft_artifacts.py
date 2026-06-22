@@ -9,7 +9,7 @@ from typing import Iterable, Literal
 from xml.sax.saxutils import escape
 
 
-DraftExportFormat = Literal["docx", "pdf"]
+DraftExportFormat = Literal["docx", "html", "pdf"]
 
 
 @dataclass
@@ -75,8 +75,8 @@ def export_markdown_draft(source_path: Path, export_format: DraftExportFormat) -
         raise ValueError("Draft path is not a file")
     if source_path.suffix.lower() not in {".md", ".markdown", ".txt"}:
         raise ValueError("Only Markdown or text drafts can be exported")
-    if export_format not in {"docx", "pdf"}:
-        raise ValueError("Export format must be 'docx' or 'pdf'")
+    if export_format not in {"docx", "html", "pdf"}:
+        raise ValueError("Export format must be 'docx', 'html', or 'pdf'")
 
     markdown = source_path.read_text(encoding="utf-8", errors="replace")
     blocks = parse_markdown_blocks(markdown)
@@ -84,6 +84,8 @@ def export_markdown_draft(source_path: Path, export_format: DraftExportFormat) -
 
     if export_format == "docx":
         _write_docx(blocks, target)
+    elif export_format == "html":
+        _write_html(blocks, target)
     else:
         _write_pdf(blocks, target)
 
@@ -137,10 +139,10 @@ def _write_docx(blocks: Iterable[MarkdownBlock], target: Path) -> None:
 </w:document>"""
     styles_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:sz w:val="24"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:sz w:val="36"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:sz w:val="30"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="240" w:after="180"/></w:pPr><w:rPr><w:b/><w:sz w:val="34"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="220" w:after="140"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="180" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="25"/></w:rPr></w:style>
 </w:styles>"""
 
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as docx:
@@ -159,6 +161,80 @@ def _write_docx(blocks: Iterable[MarkdownBlock], target: Path) -> None:
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""")
         docx.writestr("word/document.xml", document_xml)
         docx.writestr("word/styles.xml", styles_xml)
+
+
+def _write_html(blocks: Iterable[MarkdownBlock], target: Path) -> None:
+    body: list[str] = []
+    in_ul = False
+    in_ol = False
+
+    def close_lists() -> None:
+        nonlocal in_ul, in_ol
+        if in_ul:
+            body.append("</ul>")
+            in_ul = False
+        if in_ol:
+            body.append("</ol>")
+            in_ol = False
+
+    for block in blocks:
+        if block.kind == "blank":
+            close_lists()
+            continue
+        if block.kind == "heading":
+            close_lists()
+            level = min(max(block.level, 1), 3)
+            body.append(f"<h{level}>{escape(block.text)}</h{level}>")
+        elif block.kind == "bullet":
+            if not in_ul:
+                close_lists()
+                body.append("<ul>")
+                in_ul = True
+            body.append(f"<li>{escape(block.text)}</li>")
+        elif block.kind == "numbered":
+            if not in_ol:
+                close_lists()
+                body.append("<ol>")
+                in_ol = True
+            body.append(f"<li>{escape(block.text)}</li>")
+        else:
+            close_lists()
+            body.append(f"<p>{escape(block.text)}</p>")
+
+    close_lists()
+    target.write_text(
+        """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LexEdge Draft</title>
+  <style>
+    @page { margin: 26mm 22mm; }
+    body {
+      color: #111827;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 12pt;
+      line-height: 1.58;
+      margin: 0 auto;
+      max-width: 780px;
+      padding: 32px 24px;
+    }
+    h1, h2, h3 { color: #0f172a; font-family: Georgia, "Times New Roman", serif; line-height: 1.22; }
+    h1 { border-bottom: 1px solid #d1d5db; font-size: 22pt; margin: 0 0 18pt; padding-bottom: 10pt; text-align: center; }
+    h2 { font-size: 16pt; margin: 22pt 0 8pt; }
+    h3 { font-size: 13.5pt; margin: 16pt 0 6pt; }
+    p { margin: 0 0 10pt; text-align: justify; }
+    ul, ol { margin: 0 0 11pt 22pt; padding: 0; }
+    li { margin: 0 0 5pt; }
+    strong, b { color: #0f172a; }
+  </style>
+</head>
+<body>
+"""
+        + "\n".join(body)
+        + "\n</body>\n</html>\n",
+        encoding="utf-8",
+    )
 
 
 def _pdf_safe(text: str) -> str:

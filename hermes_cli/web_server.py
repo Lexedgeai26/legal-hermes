@@ -1554,8 +1554,8 @@ async def export_draft_artifact(body: DraftArtifactExportRequest):
     source = Path(body.path).expanduser()
     export_format = body.format.lower().strip()
 
-    if export_format not in {"docx", "pdf"}:
-        raise HTTPException(status_code=400, detail="Export format must be docx or pdf")
+    if export_format not in {"docx", "html", "pdf"}:
+        raise HTTPException(status_code=400, detail="Export format must be docx, html, or pdf")
 
     try:
         output = export_markdown_draft(source, export_format)  # type: ignore[arg-type]

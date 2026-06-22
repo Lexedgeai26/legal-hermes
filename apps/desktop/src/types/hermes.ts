@@ -249,7 +249,7 @@ export interface MatterCreatePayload {
 
 export type MatterUpdatePayload = Partial<MatterCreatePayload & { status: string }>
 
-export type DraftArtifactExportFormat = 'docx' | 'pdf'
+export type DraftArtifactExportFormat = 'docx' | 'html' | 'pdf'
 
 export interface DraftArtifactExportResponse {
   format: DraftArtifactExportFormat

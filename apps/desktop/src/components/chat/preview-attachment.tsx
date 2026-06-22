@@ -21,7 +21,7 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
   const cwd = useStore($currentCwd)
   const activePreview = useStore($previewTarget)
   const [opening, setOpening] = useState(false)
-  const [exporting, setExporting] = useState<null | 'docx' | 'pdf'>(null)
+  const [exporting, setExporting] = useState<null | 'docx' | 'html' | 'pdf'>(null)
   const activePreviewRef = useRef(activePreview)
   const cwdRef = useRef(cwd)
   const mountedRef = useRef(false)
@@ -108,7 +108,7 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
     }
   }
 
-  async function exportDraft(format: 'docx' | 'pdf') {
+  async function exportDraft(format: 'docx' | 'html' | 'pdf') {
     if (exporting) {
       return
     }
@@ -118,12 +118,19 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
       const result = await exportDraftArtifact(filePath, format)
       notify({
         kind: 'success',
-        title: format === 'docx' ? 'Word draft ready' : 'PDF draft ready',
+        title: format === 'docx' ? 'Word draft ready' : format === 'html' ? 'HTML draft ready' : 'PDF draft ready',
         message: result.name
       })
       await window.hermesDesktop?.openExternal(mediaExternalUrl(result.path))
     } catch (error) {
-      notifyError(error, format === 'docx' ? 'Could not export Word draft' : 'Could not export PDF draft')
+      notifyError(
+        error,
+        format === 'docx'
+          ? 'Could not export Word draft'
+          : format === 'html'
+            ? 'Could not export HTML draft'
+            : 'Could not export PDF draft'
+      )
     } finally {
       setExporting(null)
     }
@@ -163,6 +170,14 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
             type="button"
           >
             {exporting === 'pdf' ? 'Creating PDF...' : 'Export PDF'}
+          </button>
+          <button
+            className="rounded-md border border-border/55 bg-background/60 px-2 py-1 text-[0.68rem] font-medium text-foreground transition-colors hover:bg-accent/70 disabled:opacity-50"
+            disabled={exporting !== null}
+            onClick={() => void exportDraft('html')}
+            type="button"
+          >
+            {exporting === 'html' ? 'Creating HTML...' : 'Export HTML'}
           </button>
         </div>
       )}
