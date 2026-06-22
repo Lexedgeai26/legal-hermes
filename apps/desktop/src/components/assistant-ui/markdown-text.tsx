@@ -36,7 +36,7 @@ import {
   mediaPathFromMarkdownHref,
   mediaStreamUrl
 } from '@/lib/media'
-import { previewTargetFromMarkdownHref } from '@/lib/preview-targets'
+import { previewDisplayLabel, previewMarkdownHref, previewTargetFromMarkdownHref } from '@/lib/preview-targets'
 import { tailBoundedRemend } from '@/lib/remend-tail'
 import { cn } from '@/lib/utils'
 
@@ -459,6 +459,47 @@ const MARKDOWN_CONTAINER_CLASS_NAME = cn(
 )
 
 const MAX_MARKDOWN_CHARS = 200_000
+const LOCAL_MARKDOWN_DRAFT_RE = /(^|[\s(["'`])((?:\/[^\n\r]+?\.(?:md|markdown)))(?=$|[\s)"'`,.])/gi
+
+function appendDraftArtifactPreviewCards(markdown: string): string {
+  if (!/\.(?:md|markdown)\b/i.test(markdown) || markdown.includes('#preview/')) {
+    return markdown
+  }
+
+  const targets: string[] = []
+  const seen = new Set<string>()
+  let inFence = false
+
+  for (const line of markdown.split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+
+    if (inFence) {
+      continue
+    }
+
+    for (const match of line.matchAll(LOCAL_MARKDOWN_DRAFT_RE)) {
+      const target = match[2].trim()
+
+      if (!seen.has(target)) {
+        seen.add(target)
+        targets.push(target)
+      }
+    }
+  }
+
+  if (!targets.length) {
+    return markdown
+  }
+
+  const cards = targets
+    .map(target => `[${previewDisplayLabel(target)}](${previewMarkdownHref(target)})`)
+    .join('\n')
+
+  return `${markdown.trimEnd()}\n\n${cards}`
+}
 
 function HugeTextFallback({ containerClassName, text }: { containerClassName?: string; text: string }) {
   const chunks = useMemo(() => chunkByLines(text, 200), [text])
@@ -488,6 +529,7 @@ function HugeTextFallback({ containerClassName, text }: { containerClassName?: s
 function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTextSurfaceProps) {
   const { status, text } = useMessagePartText()
   const isStreaming = status.type === 'running'
+  const displayText = useMemo(() => appendDraftArtifactPreviewCards(text), [text])
 
   // Keep code parsing enabled while streaming so incomplete fenced blocks still
   // render as code cards. The expensive Shiki pass is deferred by
@@ -583,8 +625,8 @@ function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTex
     [isStreaming]
   )
 
-  if (text.length > MAX_MARKDOWN_CHARS) {
-    return <HugeTextFallback containerClassName={containerClassName} text={text} />
+  if (displayText.length > MAX_MARKDOWN_CHARS) {
+    return <HugeTextFallback containerClassName={containerClassName} text={displayText} />
   }
 
   return (
@@ -607,7 +649,7 @@ function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTex
       parseIncompleteMarkdown={false}
       parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocksCached}
       plugins={plugins}
-      preprocess={preprocessWithTailRepair}
+      preprocess={value => preprocessWithTailRepair(appendDraftArtifactPreviewCards(value))}
     />
   )
 }

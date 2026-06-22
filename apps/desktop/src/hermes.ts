@@ -12,6 +12,8 @@ import type {
   CronJob,
   CronJobCreatePayload,
   CronJobUpdates,
+  DraftArtifactExportFormat,
+  DraftArtifactExportResponse,
   ElevenLabsVoicesResponse,
   EnvVarInfo,
   GmailOAuthConnectResponse,
@@ -75,6 +77,8 @@ export type {
   CronJobCreatePayload,
   CronJobSchedule,
   CronJobUpdates,
+  DraftArtifactExportFormat,
+  DraftArtifactExportResponse,
   ElevenLabsVoice,
   ElevenLabsVoicesResponse,
   EnvVarInfo,
@@ -664,6 +668,18 @@ export function deleteMatter(matterId: string): Promise<{ ok: boolean }> {
     ...profileScoped(),
     path: `/api/matters/${encodeURIComponent(matterId)}`,
     method: 'DELETE'
+  })
+}
+
+export function exportDraftArtifact(
+  path: string,
+  format: DraftArtifactExportFormat
+): Promise<DraftArtifactExportResponse> {
+  return window.hermesDesktop.api<DraftArtifactExportResponse>({
+    path: '/api/draft-artifacts/export',
+    method: 'POST',
+    body: { format, path },
+    timeoutMs: 60_000
   })
 }
 

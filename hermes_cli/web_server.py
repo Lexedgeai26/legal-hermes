@@ -69,6 +69,7 @@ from hermes_cli.memory_providers import (
     ProviderField,
     get_memory_provider,
 )
+from hermes_cli.draft_artifacts import export_markdown_draft
 from gateway.status import (
     get_running_pid,
     get_runtime_status_running_pid,
@@ -782,6 +783,11 @@ class ManagedDirectoryCreate(BaseModel):
 class ManagedFileDelete(BaseModel):
     path: str
     recursive: bool = False
+
+
+class DraftArtifactExportRequest(BaseModel):
+    path: str
+    format: str
 
 
 _AUDIO_MIME_EXTENSIONS: Dict[str, str] = {
@@ -1541,6 +1547,35 @@ async def download_managed_file(request: Request, path: str):
         filename=target.name,
         content_disposition_type="attachment",
     )
+
+
+@app.post("/api/draft-artifacts/export")
+async def export_draft_artifact(body: DraftArtifactExportRequest):
+    source = Path(body.path).expanduser()
+    export_format = body.format.lower().strip()
+
+    if export_format not in {"docx", "pdf"}:
+        raise HTTPException(status_code=400, detail="Export format must be docx or pdf")
+
+    try:
+        output = export_markdown_draft(source, export_format)  # type: ignore[arg-type]
+        size = output.stat().st_size
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Draft file is not readable or export path is not writable")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not export draft: {exc}")
+
+    return {
+        "format": export_format,
+        "name": output.name,
+        "ok": True,
+        "path": str(output),
+        "size": size,
+    }
 
 
 @app.post("/api/files/upload")

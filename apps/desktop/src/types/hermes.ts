@@ -249,6 +249,16 @@ export interface MatterCreatePayload {
 
 export type MatterUpdatePayload = Partial<MatterCreatePayload & { status: string }>
 
+export type DraftArtifactExportFormat = 'docx' | 'pdf'
+
+export interface DraftArtifactExportResponse {
+  format: DraftArtifactExportFormat
+  name: string
+  ok: boolean
+  path: string
+  size: number
+}
+
 export interface GmailOAuthConnectResponse {
   email: string
   ok: boolean

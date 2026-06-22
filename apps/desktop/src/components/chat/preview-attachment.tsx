@@ -2,10 +2,12 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useRef, useState } from 'react'
 
 import { useI18n } from '@/i18n'
+import { exportDraftArtifact } from '@/hermes'
 import { MonitorPlay } from '@/lib/icons'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
+import { filePathFromMediaPath, mediaExternalUrl } from '@/lib/media'
 import { previewName } from '@/lib/preview-targets'
-import { notifyError } from '@/store/notifications'
+import { notify, notifyError } from '@/store/notifications'
 import {
   $previewTarget,
   dismissPreviewTarget,
@@ -19,6 +21,7 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
   const cwd = useStore($currentCwd)
   const activePreview = useStore($previewTarget)
   const [opening, setOpening] = useState(false)
+  const [exporting, setExporting] = useState<null | 'docx' | 'pdf'>(null)
   const activePreviewRef = useRef(activePreview)
   const cwdRef = useRef(cwd)
   const mountedRef = useRef(false)
@@ -26,6 +29,8 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
   const targetRef = useRef(target)
   const name = previewName(target)
   const isActive = activePreview?.source === target
+  const filePath = filePathFromMediaPath(target)
+  const isMarkdownDraft = /\.(?:md|markdown)$/i.test(filePath.split(/[?#]/, 1)[0] || filePath)
 
   activePreviewRef.current = activePreview
   cwdRef.current = cwd
@@ -103,6 +108,27 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
     }
   }
 
+  async function exportDraft(format: 'docx' | 'pdf') {
+    if (exporting) {
+      return
+    }
+
+    setExporting(format)
+    try {
+      const result = await exportDraftArtifact(filePath, format)
+      notify({
+        kind: 'success',
+        title: format === 'docx' ? 'Word draft ready' : 'PDF draft ready',
+        message: result.name
+      })
+      await window.hermesDesktop?.openExternal(mediaExternalUrl(result.path))
+    } catch (error) {
+      notifyError(error, format === 'docx' ? 'Could not export Word draft' : 'Could not export PDF draft')
+    } finally {
+      setExporting(null)
+    }
+  }
+
   return (
     <div className="flex w-full max-w-160 flex-wrap items-center gap-2.5 rounded-lg border border-border/55 bg-card/55 px-2.5 py-1.5 text-sm">
       <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/55 text-muted-foreground/85">
@@ -120,6 +146,26 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
       >
         {opening ? t.preview.opening : isActive ? t.preview.hide : t.preview.openPreview}
       </button>
+      {isMarkdownDraft && (
+        <div className="ml-9 flex w-[calc(100%-2.25rem)] flex-wrap gap-1.5 border-t border-border/45 pt-1.5">
+          <button
+            className="rounded-md border border-border/55 bg-background/60 px-2 py-1 text-[0.68rem] font-medium text-foreground transition-colors hover:bg-accent/70 disabled:opacity-50"
+            disabled={exporting !== null}
+            onClick={() => void exportDraft('docx')}
+            type="button"
+          >
+            {exporting === 'docx' ? 'Creating Word...' : 'Export Word'}
+          </button>
+          <button
+            className="rounded-md border border-border/55 bg-background/60 px-2 py-1 text-[0.68rem] font-medium text-foreground transition-colors hover:bg-accent/70 disabled:opacity-50"
+            disabled={exporting !== null}
+            onClick={() => void exportDraft('pdf')}
+            type="button"
+          >
+            {exporting === 'pdf' ? 'Creating PDF...' : 'Export PDF'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
