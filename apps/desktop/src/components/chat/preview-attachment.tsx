@@ -30,7 +30,9 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
   const name = previewName(target)
   const isActive = activePreview?.source === target
   const filePath = filePathFromMediaPath(target)
-  const isMarkdownDraft = /\.(?:md|markdown)$/i.test(filePath.split(/[?#]/, 1)[0] || filePath)
+  const cleanPath = filePath.split(/[?#]/, 1)[0] || filePath
+  const isMarkdownDraft = /\.(?:md|markdown)$/i.test(cleanPath)
+  const isDocumentArtifact = /\.(?:docx?|pdf|html?|rtf|odt|xlsx?|csv|pptx?)$/i.test(cleanPath)
 
   activePreviewRef.current = activePreview
   cwdRef.current = cwd
@@ -52,6 +54,16 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
 
   async function togglePreview() {
     if (opening) {
+      return
+    }
+
+    if (isDocumentArtifact && !isMarkdownDraft) {
+      try {
+        await window.hermesDesktop?.openExternal(mediaExternalUrl(filePath))
+      } catch (error) {
+        notifyError(error, 'Could not open document')
+      }
+
       return
     }
 
@@ -151,7 +163,13 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
         onClick={() => void togglePreview()}
         type="button"
       >
-        {opening ? t.preview.opening : isActive ? t.preview.hide : t.preview.openPreview}
+        {isDocumentArtifact && !isMarkdownDraft
+          ? 'Open / Download'
+          : opening
+            ? t.preview.opening
+            : isActive
+              ? t.preview.hide
+              : t.preview.openPreview}
       </button>
       {isMarkdownDraft && (
         <div className="ml-9 flex w-[calc(100%-2.25rem)] flex-wrap gap-1.5 border-t border-border/45 pt-1.5">

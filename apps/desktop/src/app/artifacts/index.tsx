@@ -55,8 +55,11 @@ const MARKDOWN_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g
 const URL_RE = /https?:\/\/[^\s<>"')]+/g
 const PATH_RE = /(^|[\s("'`])((?:\/|~\/|\.\.?\/)[^\s"'`<>]+(?:\.[a-z0-9]{1,8})?)/gi
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp)(?:\?.*)?$/i
-const FILE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|pdf|txt|json|md|csv|zip|tar|gz|mp3|wav|mp4|mov)(?:\?.*)?$/i
+const FILE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|pdf|docx?|rtf|odt|md|markdown|html?|xlsx?|csv|pptx?)(?:\?.*)?$/i
 const KEY_HINT_RE = /(path|file|url|image|artifact|output|download|result|target)/i
+const HIDDEN_SYSTEM_PATH_RE =
+  /(?:^|\/)(?:\.hermes\/skills|\.hermes\/hermes-agent|node_modules|__pycache__|\.venv|venv|dist|build|app\.asar\.unpacked)(?:\/|$)|^\/(?:tmp|private\/tmp|var\/folders)\//i
+const TECHNICAL_FILE_RE = /\.(?:py|pyc|js|jsx|ts|tsx|xml|rels|json|yaml|yml|toml|lock|log|sqlite|db|db-wal|db-shm)(?:\?.*)?$/i
 
 const ARTIFACT_TIME_FMT = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
@@ -95,6 +98,10 @@ function looksLikePathOrUrl(value: string): boolean {
 }
 
 function looksLikeArtifact(value: string): boolean {
+  if (isHiddenSystemArtifact(value)) {
+    return false
+  }
+
   if (/^(?:https?:\/\/|data:image\/)/.test(value)) {
     return true
   }
@@ -104,6 +111,28 @@ function looksLikeArtifact(value: string): boolean {
   }
 
   return value.startsWith('/') && value.includes('.')
+}
+
+function artifactPath(value: string): string {
+  if (!value.startsWith('file://')) {
+    return value
+  }
+
+  try {
+    return decodeURIComponent(new URL(value).pathname)
+  } catch {
+    return value.replace(/^file:\/\//i, '')
+  }
+}
+
+function isHiddenSystemArtifact(value: string): boolean {
+  if (/^https?:\/\//i.test(value) || value.startsWith('data:image/')) {
+    return false
+  }
+
+  const path = artifactPath(value)
+
+  return HIDDEN_SYSTEM_PATH_RE.test(path) || TECHNICAL_FILE_RE.test(path)
 }
 
 function artifactKind(value: string): ArtifactKind {

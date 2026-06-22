@@ -461,8 +461,15 @@ const MARKDOWN_CONTAINER_CLASS_NAME = cn(
 )
 
 const MAX_MARKDOWN_CHARS = 200_000
-const ABSOLUTE_MARKDOWN_DRAFT_RE = /(^|[\s(["'`])((?:\/[^\n\r]+?\.(?:md|markdown)))(?=$|[\s)"'`,.])/gi
-const RELATIVE_MARKDOWN_DRAFT_RE = /(^|[\s(["'`:])((?!\/)(?!https?:\/\/)[A-Za-z0-9][A-Za-z0-9._ -]*\.(?:md|markdown))(?=$|[\s)"'`,.])/gi
+const DOCUMENT_ARTIFACT_EXT = String.raw`(?:docx?|pdf|html?|md|markdown|rtf|odt|xlsx?|csv|pptx?)`
+const ABSOLUTE_DOCUMENT_ARTIFACT_RE = new RegExp(
+  String.raw`(^|[\s(["'\`])((?:\/[^\n\r]+?\.${DOCUMENT_ARTIFACT_EXT}))(?=$|[\s)"'\`,.])`,
+  'gi'
+)
+const RELATIVE_DOCUMENT_ARTIFACT_RE = new RegExp(
+  String.raw`(^|[\s(["'\`:])((?!\/)(?!https?:\/\/)[A-Za-z0-9][A-Za-z0-9._ -]*\.${DOCUMENT_ARTIFACT_EXT})(?=$|[\s)"'\`,.])`,
+  'gi'
+)
 
 function activeMatterFolderFromAttachments() {
   const matter = $composerAttachments.get().find(attachment => attachment.id.startsWith('matter:'))
@@ -489,7 +496,7 @@ function joinMatterPath(folder: string, fileName: string) {
 }
 
 function appendDraftArtifactPreviewCards(markdown: string, matterFolder = ''): string {
-  if (!/\.(?:md|markdown)\b/i.test(markdown) || markdown.includes('#preview/')) {
+  if (!/\.(?:docx?|pdf|html?|md|markdown|rtf|odt|xlsx?|csv|pptx?)\b/i.test(markdown) || markdown.includes('#preview/')) {
     return markdown
   }
 
@@ -507,7 +514,7 @@ function appendDraftArtifactPreviewCards(markdown: string, matterFolder = ''): s
       continue
     }
 
-    for (const match of line.matchAll(ABSOLUTE_MARKDOWN_DRAFT_RE)) {
+    for (const match of line.matchAll(ABSOLUTE_DOCUMENT_ARTIFACT_RE)) {
       const target = match[2].trim()
 
       if (!seen.has(target)) {
@@ -517,7 +524,7 @@ function appendDraftArtifactPreviewCards(markdown: string, matterFolder = ''): s
     }
 
     if (matterFolder) {
-      for (const match of line.matchAll(RELATIVE_MARKDOWN_DRAFT_RE)) {
+      for (const match of line.matchAll(RELATIVE_DOCUMENT_ARTIFACT_RE)) {
         const fileName = match[2].trim()
         const target = joinMatterPath(matterFolder, fileName)
 
