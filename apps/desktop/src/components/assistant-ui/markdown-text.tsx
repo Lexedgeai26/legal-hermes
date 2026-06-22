@@ -495,6 +495,24 @@ function joinMatterPath(folder: string, fileName: string) {
   return `${folder.replace(/\/+$/, '')}/${fileName.replace(/^\.?\//, '')}`
 }
 
+function documentArtifactTargetFromText(text: string, matterFolder = ''): string | null {
+  const value = text.trim().replace(/^`|`$/g, '').replace(/[),.;]+$/, '')
+
+  if (!/\.(?:docx?|pdf|html?|md|markdown|rtf|odt|xlsx?|csv|pptx?)$/i.test(value)) {
+    return null
+  }
+
+  if (value.startsWith('/') || value.startsWith('file://')) {
+    return value
+  }
+
+  if (matterFolder && !/^https?:\/\//i.test(value)) {
+    return joinMatterPath(matterFolder, value)
+  }
+
+  return null
+}
+
 function appendDraftArtifactPreviewCards(markdown: string, matterFolder = ''): string {
   if (!/\.(?:docx?|pdf|html?|md|markdown|rtf|odt|xlsx?|csv|pptx?)\b/i.test(markdown) || markdown.includes('#preview/')) {
     return markdown
@@ -611,9 +629,19 @@ function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTex
         // mirroring the CSS isolate that already keeps it out of the
         // plaintext scan. Fenced code never reaches this override; it goes
         // through the code plugin's CodeCard path.
-        inlineCode: ({ className, ...props }: ComponentProps<'code'>) => (
-          <code className={className} dir="ltr" {...props} />
-        ),
+        inlineCode: ({ children, className, ...props }: ComponentProps<'code'>) => {
+          const target = documentArtifactTargetFromText(childrenToText(children), matterFolder)
+
+          if (target) {
+            return (
+              <span className="not-prose my-2 block">
+                <PreviewAttachment source="explicit-link" target={target} />
+              </span>
+            )
+          }
+
+          return <code className={className} dir="ltr" {...props}>{children}</code>
+        },
         // `---` as quiet spacing, not a heavy full-width rule.
         hr: (_props: ComponentProps<'hr'>) => <div aria-hidden className="my-3" />,
         // Lists and blockquotes have chrome that sits *beside* the text
@@ -670,7 +698,7 @@ function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTex
         img: MarkdownImage,
         SyntaxHighlighter: (props: SyntaxHighlighterProps) => <SyntaxHighlighter {...props} defer={isStreaming} />
       }) as StreamdownTextComponents,
-    [isStreaming]
+    [isStreaming, matterFolder]
   )
 
   if (displayText.length > MAX_MARKDOWN_CHARS) {

@@ -102,8 +102,12 @@ function looksLikeArtifact(value: string): boolean {
     return false
   }
 
-  if (/^(?:https?:\/\/|data:image\/)/.test(value)) {
+  if (value.startsWith('data:image/')) {
     return true
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return IMAGE_EXT_RE.test(value) || FILE_EXT_RE.test(value)
   }
 
   if (looksLikePathOrUrl(value) && (IMAGE_EXT_RE.test(value) || FILE_EXT_RE.test(value))) {
