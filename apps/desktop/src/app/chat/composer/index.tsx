@@ -24,10 +24,11 @@ import { SLASH_COMMAND_RE } from '@/lib/chat-runtime'
 import { desktopSlashCommandTakesArgs } from '@/lib/desktop-slash-commands'
 import { DATA_IMAGE_URL_RE } from '@/lib/embedded-images'
 import { triggerHaptic } from '@/lib/haptics'
+import { FolderOpen, XIcon } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import {
   $composerAttachments,
-  clearComposerAttachments,
+  clearTransientComposerAttachments,
   clearSessionDraft,
   type ComposerAttachment,
   stashSessionDraft,
@@ -201,6 +202,14 @@ export function ChatBar({
   const queuedPrompts = useMemo(
     () => (activeQueueSessionKey ? (queuedPromptsBySession[activeQueueSessionKey] ?? []) : []),
     [activeQueueSessionKey, queuedPromptsBySession]
+  )
+  const activeMatterAttachment = useMemo(
+    () => attachments.find(attachment => attachment.id.startsWith('matter:')) ?? null,
+    [attachments]
+  )
+  const normalAttachments = useMemo(
+    () => attachments.filter(attachment => !attachment.id.startsWith('matter:')),
+    [attachments]
   )
 
   // Status items (subagents, background processes) are keyed by the RUNTIME
@@ -1444,7 +1453,7 @@ export function ChatBar({
     }
 
     clearDraft()
-    clearComposerAttachments()
+    clearTransientComposerAttachments()
     triggerHaptic('selection')
 
     return true
@@ -1694,7 +1703,7 @@ export function ChatBar({
       triggerHaptic('submit')
       resetBrowseState(sessionId)
       clearDraft()
-      clearComposerAttachments()
+      clearTransientComposerAttachments()
       dispatchSubmit(text, submittedAttachments)
     }
 
@@ -2061,7 +2070,12 @@ export function ChatBar({
                     </div>
                   </div>
                 )}
-                {attachments.length > 0 && <AttachmentList attachments={attachments} onRemove={onRemoveAttachment} />}
+                {activeMatterAttachment && (
+                  <ActiveMatterBar attachment={activeMatterAttachment} onRemove={onRemoveAttachment} />
+                )}
+                {normalAttachments.length > 0 && (
+                  <AttachmentList attachments={normalAttachments} onRemove={onRemoveAttachment} />
+                )}
                 <div
                   className={cn(
                     'grid w-full',
@@ -2111,6 +2125,47 @@ export function ChatBarFallback() {
           )}
         />
       </div>
+    </div>
+  )
+}
+
+function ActiveMatterBar({
+  attachment,
+  onRemove
+}: {
+  attachment: ComposerAttachment
+  onRemove?: (id: string) => void
+}) {
+  const matterName = attachment.label.replace(/^Matter:\s*/i, '').trim() || attachment.label
+
+  return (
+    <div
+      className="flex min-w-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-slate-950 shadow-sm"
+      role="status"
+    >
+      <span className="grid size-7 shrink-0 place-items-center rounded-md border border-slate-300 bg-slate-50 text-slate-800">
+        <FolderOpen className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-slate-600">Active matter</span>
+          <span className="truncate text-sm font-semibold text-slate-950">{matterName}</span>
+        </div>
+        {attachment.detail && <div className="mt-0.5 truncate text-xs text-slate-700">{attachment.detail}</div>}
+      </div>
+      {onRemove && (
+        <Button
+          aria-label={`Remove active matter ${matterName}`}
+          className="size-7 rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+          onClick={() => onRemove(attachment.id)}
+          size="icon-xs"
+          title="Remove active matter"
+          type="button"
+          variant="ghost"
+        >
+          <XIcon className="size-4" />
+        </Button>
+      )}
     </div>
   )
 }

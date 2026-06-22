@@ -7,9 +7,11 @@ export interface ComposerAttachment {
   kind: 'image' | 'file' | 'folder' | 'terminal' | 'url'
   label: string
   detail?: string
+  contextText?: string
   refText?: string
   previewUrl?: string
   path?: string
+  persistent?: boolean
   attachedSessionId?: string
   /** Set while the file/image bytes are being staged into the session
    * workspace (remote upload or local stage), and 'error' if that failed.
@@ -143,6 +145,15 @@ export function addComposerAttachment(attachment: ComposerAttachment) {
   }
 }
 
+export function setComposerMatterAttachment(attachment: ComposerAttachment) {
+  const previous = $composerAttachments.get()
+  const withoutMatter = previous.filter(item => !item.id.startsWith('matter:'))
+  const next = upsertAttachment(withoutMatter, attachment)
+  $composerAttachments.set(next)
+
+  triggerHaptic('selection')
+}
+
 export function removeComposerAttachment(id: string): ComposerAttachment | null {
   const current = $composerAttachments.get()
   const removed = current.find(attachment => attachment.id === id) || null
@@ -172,6 +183,10 @@ export function updateComposerAttachment(attachment: ComposerAttachment): boolea
 
 export function clearComposerAttachments() {
   $composerAttachments.set([])
+}
+
+export function clearTransientComposerAttachments() {
+  $composerAttachments.set($composerAttachments.get().filter(attachment => attachment.persistent))
 }
 
 /** Update only the upload state of an existing attachment (no-op if it's gone,

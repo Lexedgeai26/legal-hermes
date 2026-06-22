@@ -29,7 +29,7 @@ import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { setSessionYolo } from '@/lib/yolo-session'
 import {
   $composerAttachments,
-  clearComposerAttachments,
+  clearTransientComposerAttachments,
   type ComposerAttachment,
   setComposerAttachmentUploadState,
   setComposerDraft,
@@ -564,13 +564,17 @@ export function usePromptActions({
       let attachmentRefs = attachments.map(optimisticAttachmentRef).filter((r): r is string => Boolean(r))
 
       const buildContextText = (atts: ComposerAttachment[]): string => {
+        const hiddenContext = atts
+          .map(a => a.contextText)
+          .filter(Boolean)
+          .join('\n\n')
         const contextRefs = atts
           .map(a => a.refText)
           .filter(Boolean)
           .join('\n')
 
         return (
-          [contextRefs, terminalContextBlocks, visibleText].filter(Boolean).join('\n\n') ||
+          [hiddenContext, contextRefs, terminalContextBlocks, visibleText].filter(Boolean).join('\n\n') ||
           (atts.some(a => a.kind === 'image') ? 'What do you see in this image?' : '')
         )
       }
@@ -733,7 +737,7 @@ export function usePromptActions({
         }
 
         if (usingComposerAttachments) {
-          clearComposerAttachments()
+          clearTransientComposerAttachments()
         }
 
         return true
