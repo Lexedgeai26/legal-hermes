@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { requestComposerInsert } from '@/app/chat/composer/focus'
 import { NEW_CHAT_ROUTE } from '@/app/routes'
@@ -11,10 +11,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { createMatter, deleteMatter, indexMatter, listMatters } from '@/hermes'
 import { selectDesktopPaths } from '@/lib/desktop-fs'
 import { FileText, FolderOpen, RefreshCw, Trash2 } from '@/lib/icons'
+import { mediaExternalUrl } from '@/lib/media'
 import { matterPrompt } from '@/lib/matter-prompt'
 import { cn } from '@/lib/utils'
 import { notify, notifyError } from '@/store/notifications'
-import type { MatterCreatePayload, MatterRecord } from '@/types/hermes'
+import type { MatterCreatePayload, MatterFile, MatterRecord } from '@/types/hermes'
 
 const MATTER_TYPES = [
   ['general', 'General'],
@@ -50,6 +51,8 @@ const emptyForm: MatterCreatePayload = {
   role: 'advocate'
 }
 
+const GENERATED_DOC_EXTENSIONS = new Set(['doc', 'docx', 'html', 'htm', 'md', 'markdown', 'odt', 'pdf', 'rtf'])
+
 function formatDate(value: number | null | undefined) {
   if (!value) {
     return 'Not indexed'
@@ -79,8 +82,15 @@ function fileSummary(matter: MatterRecord) {
     .join(' · ')
 }
 
+function generatedDocuments(matter: MatterRecord): MatterFile[] {
+  return matter.files
+    .filter(file => GENERATED_DOC_EXTENSIONS.has((file.extension || '').toLowerCase()))
+    .sort((left, right) => (right.modified_at || 0) - (left.modified_at || 0))
+}
+
 export function MattersView() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [matters, setMatters] = useState<MatterRecord[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MatterCreatePayload>(emptyForm)
@@ -89,13 +99,21 @@ export function MattersView() {
   const [indexingId, setIndexingId] = useState<string | null>(null)
 
   const selected = useMemo(() => matters.find(matter => matter.id === selectedId) ?? matters[0] ?? null, [matters, selectedId])
+  const draftFiles = useMemo(() => selected ? generatedDocuments(selected).slice(0, 12) : [], [selected])
 
   async function refresh() {
     setLoading(true)
     try {
       const result = await listMatters()
+      const requestedMatterId = searchParams.get('matter')
       setMatters(result.matters)
-      setSelectedId(current => current && result.matters.some(matter => matter.id === current) ? current : result.matters[0]?.id ?? null)
+      setSelectedId(current => {
+        if (requestedMatterId && result.matters.some(matter => matter.id === requestedMatterId)) {
+          return requestedMatterId
+        }
+
+        return current && result.matters.some(matter => matter.id === current) ? current : result.matters[0]?.id ?? null
+      })
     } catch (err) {
       notifyError(err, 'Could not load matters.')
     } finally {
@@ -178,6 +196,14 @@ export function MattersView() {
   function workInChat(matter: MatterRecord) {
     navigate(NEW_CHAT_ROUTE)
     requestComposerInsert(matterPrompt(matter), { mode: 'block', target: 'main' })
+  }
+
+  async function openFile(file: MatterFile) {
+    try {
+      await window.hermesDesktop?.openExternal?.(mediaExternalUrl(file.path))
+    } catch (err) {
+      notifyError(err, 'Could not open document.')
+    }
   }
 
   return (
@@ -333,6 +359,36 @@ export function MattersView() {
               <section>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Generated documents
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Drafts and exports found in this matter folder. Use Re-index after LexEdge creates new files.
+                    </div>
+                  </div>
+                  <Button disabled={indexingId === selected.id} onClick={() => reindex(selected)} size="sm" variant="secondary">
+                    <RefreshCw className="mr-2 size-4" />
+                    Refresh documents
+                  </Button>
+                </div>
+                <div className="overflow-hidden rounded-md border border-border bg-background">
+                  {draftFiles.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">
+                      No generated Word, PDF, HTML, or Markdown drafts found yet.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border/70">
+                      {draftFiles.map(file => (
+                        <MatterDocumentRow file={file} key={file.path} onOpen={() => openFile(file)} prominent />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Documents</div>
                     <div className="mt-1 text-xs text-muted-foreground">
                       {fileSummary(selected) || 'No supported documents indexed'} · {selected.skipped_count} skipped
@@ -345,17 +401,7 @@ export function MattersView() {
                   ) : (
                     <div className="divide-y divide-border/70">
                       {selected.files.slice(0, 120).map(file => (
-                        <div className="grid grid-cols-[1fr_5rem_8rem] items-center gap-3 px-4 py-2 text-sm" key={file.path}>
-                          <div className="flex min-w-0 items-center gap-2">
-                            <FileText className="size-4 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">{file.name}</div>
-                              <div className="truncate text-xs text-muted-foreground">{file.path}</div>
-                            </div>
-                          </div>
-                          <div className="text-xs uppercase text-muted-foreground">{file.extension || 'file'}</div>
-                          <div className="text-right text-xs text-muted-foreground">{formatBytes(file.size)}</div>
-                        </div>
+                        <MatterDocumentRow file={file} key={file.path} onOpen={() => openFile(file)} />
                       ))}
                     </div>
                   )}
@@ -379,6 +425,40 @@ function MatterMetric({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border border-border bg-background p-3">
       <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
       <div className="mt-1 truncate text-sm font-medium">{value}</div>
+    </div>
+  )
+}
+
+function MatterDocumentRow({
+  file,
+  onOpen,
+  prominent = false
+}: {
+  file: MatterFile
+  onOpen: () => void
+  prominent?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'grid items-center gap-3 px-4 py-2 text-sm',
+        prominent ? 'grid-cols-[1fr_5rem_9.5rem]' : 'grid-cols-[1fr_5rem_8rem_8.5rem]'
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <FileText className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <div className="truncate font-medium">{file.name}</div>
+          <div className="truncate text-xs text-muted-foreground">{file.path}</div>
+        </div>
+      </div>
+      <div className="text-xs uppercase text-muted-foreground">{file.extension || 'file'}</div>
+      {!prominent && <div className="text-right text-xs text-muted-foreground">{formatBytes(file.size)}</div>}
+      <div className="text-right">
+        <Button onClick={onOpen} size="sm" type="button" variant={prominent ? 'default' : 'secondary'}>
+          Open / Download
+        </Button>
+      </div>
     </div>
   )
 }

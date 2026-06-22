@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/pagination'
 import { TextTab, TextTabMeta } from '@/components/ui/text-tab'
 import { Tip } from '@/components/ui/tooltip'
-import { getSessionMessages, listAllProfileSessions } from '@/hermes'
+import { getSessionMessages, indexMatter, listAllProfileSessions, listMatters } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
 import { sessionTitle } from '@/lib/chat-runtime'
 import { ExternalLink, ExternalLinkIcon, hostPathLabel, urlSlugTitleLabel, useLinkTitle } from '@/lib/external-link'
@@ -26,13 +26,13 @@ import { FileImage, FileText, FolderOpen, Link2 } from '@/lib/icons'
 import { mediaExternalUrl } from '@/lib/media'
 import { cn } from '@/lib/utils'
 import { notifyError } from '@/store/notifications'
-import type { SessionInfo, SessionMessage } from '@/types/hermes'
+import type { MatterRecord, SessionInfo, SessionMessage } from '@/types/hermes'
 
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey'
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
 import { PAGE_INSET_NEG_X, PAGE_INSET_X } from '../layout-constants'
 import { PageSearchShell } from '../page-search-shell'
-import { sessionRoute } from '../routes'
+import { MATTERS_ROUTE, sessionRoute } from '../routes'
 import type { SetStatusbarItemGroup } from '../shell/statusbar-controls'
 
 type ArtifactKind = 'image' | 'file' | 'link'
@@ -45,8 +45,11 @@ interface ArtifactRecord {
   value: string
   href: string
   label: string
-  sessionId: string
+  matterId?: string
+  matterName?: string
+  sessionId?: string
   sessionTitle: string
+  source: 'matter' | 'session'
   timestamp: number
 }
 
@@ -330,9 +333,42 @@ export function collectArtifactsForSession(session: SessionInfo, messages: Sessi
         label: artifactLabel(value),
         sessionId: session.id,
         sessionTitle: title,
+        source: 'session',
         timestamp: message.timestamp || session.last_active || session.started_at || Date.now()
       })
     })
+  }
+
+  return Array.from(found.values())
+}
+
+function collectArtifactsForMatter(matter: MatterRecord): ArtifactRecord[] {
+  return matter.files
+    .filter(file => looksLikeArtifact(file.path))
+    .map(file => ({
+      id: `matter:${matter.id}:${file.path}`,
+      kind: artifactKind(file.path),
+      value: file.path,
+      href: artifactHref(file.path),
+      label: file.name || artifactLabel(file.path),
+      matterId: matter.id,
+      matterName: matter.name,
+      sessionTitle: `Matter: ${matter.name}`,
+      source: 'matter' as const,
+      timestamp: (file.modified_at || matter.updated_at || matter.indexed_at || matter.created_at || Date.now()) * 1000
+    }))
+}
+
+function dedupeArtifacts(artifacts: ArtifactRecord[]): ArtifactRecord[] {
+  const found = new Map<string, ArtifactRecord>()
+
+  for (const artifact of artifacts) {
+    const key = `${artifact.kind}:${artifact.value}`
+    const existing = found.get(key)
+
+    if (!existing || (existing.source === 'session' && artifact.source === 'matter')) {
+      found.set(key, artifact)
+    }
   }
 
   return Array.from(found.values())
@@ -382,6 +418,7 @@ function paginationItems(page: number, pageCount: number): Array<number | 'ellip
 type CellCtx = {
   onOpen: (href: string) => void | Promise<void>
   onOpenChat: (sessionId: string) => void
+  onOpenMatter: (matterId: string) => void
 }
 
 interface ArtifactColumn {
@@ -418,10 +455,13 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
 
     try {
       const sessions = (await listAllProfileSessions(30, 1)).sessions
-      const results = await Promise.allSettled(sessions.map(session => getSessionMessages(session.id, session.profile)))
+      const [messageResults, matterResult] = await Promise.all([
+        Promise.allSettled(sessions.map(session => getSessionMessages(session.id, session.profile))),
+        listMatters().catch(() => ({ matters: [] as MatterRecord[] }))
+      ])
       const nextArtifacts: ArtifactRecord[] = []
 
-      results.forEach((result, index) => {
+      messageResults.forEach((result, index) => {
         if (result.status !== 'fulfilled') {
           return
         }
@@ -430,7 +470,23 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
         nextArtifacts.push(...collectArtifactsForSession(session, result.value.messages))
       })
 
-      setArtifacts(nextArtifacts.sort((left, right) => right.timestamp - left.timestamp))
+      const indexedMatters = await Promise.allSettled(
+        matterResult.matters.map(async matter => {
+          try {
+            return (await indexMatter(matter.id)).matter
+          } catch {
+            return matter
+          }
+        })
+      )
+
+      for (const result of indexedMatters) {
+        if (result.status === 'fulfilled') {
+          nextArtifacts.push(...collectArtifactsForMatter(result.value))
+        }
+      }
+
+      setArtifacts(dedupeArtifacts(nextArtifacts).sort((left, right) => right.timestamp - left.timestamp))
     } catch (err) {
       notifyError(err, a.failedLoad)
       setArtifacts([])
@@ -534,7 +590,8 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
 
   const cellCtx: CellCtx = {
     onOpen: openArtifact,
-    onOpenChat: sessionId => navigate(sessionRoute(sessionId))
+    onOpenChat: sessionId => navigate(sessionRoute(sessionId)),
+    onOpenMatter: matterId => navigate(`${MATTERS_ROUTE}?matter=${encodeURIComponent(matterId)}`)
   }
 
   return (
@@ -613,6 +670,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                       key={artifact.id}
                       onImageError={markImageFailed}
                       onOpenChat={sessionId => navigate(sessionRoute(sessionId))}
+                      onOpenMatter={matterId => navigate(`${MATTERS_ROUTE}?matter=${encodeURIComponent(matterId)}`)}
                     />
                   ))}
                 </div>
@@ -707,9 +765,10 @@ interface ArtifactImageCardProps {
   failedImage: boolean
   onImageError: (id: string) => void
   onOpenChat: (sessionId: string) => void
+  onOpenMatter: (matterId: string) => void
 }
 
-function ArtifactImageCard({ artifact, failedImage, onImageError, onOpenChat }: ArtifactImageCardProps) {
+function ArtifactImageCard({ artifact, failedImage, onImageError, onOpenChat, onOpenMatter }: ArtifactImageCardProps) {
   const { t } = useI18n()
   const a = t.artifacts
   const kindLabel = artifact.kind === 'image' ? a.kindImage : artifact.kind === 'file' ? a.kindFile : a.kindLink
@@ -753,9 +812,16 @@ function ArtifactImageCard({ artifact, failedImage, onImageError, onOpenChat }: 
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <Button onClick={() => onOpenChat(artifact.sessionId)} size="xs" type="button" variant="textStrong">
+          <Button
+            onClick={() =>
+              artifact.matterId ? onOpenMatter(artifact.matterId) : artifact.sessionId && onOpenChat(artifact.sessionId)
+            }
+            size="xs"
+            type="button"
+            variant="textStrong"
+          >
             <FolderOpen className="size-3" />
-            {a.chat}
+            {artifact.matterId ? 'Matter' : a.chat}
           </Button>
         </div>
       </div>
@@ -857,7 +923,12 @@ function LocationCell({ artifact }: { artifact: ArtifactRecord; ctx: CellCtx }) 
 
 function SessionCell({ artifact, ctx }: { artifact: ArtifactRecord; ctx: CellCtx }) {
   return (
-    <ArtifactCellAction onClick={() => ctx.onOpenChat(artifact.sessionId)} title={artifact.sessionTitle}>
+    <ArtifactCellAction
+      onClick={() =>
+        artifact.matterId ? ctx.onOpenMatter(artifact.matterId) : artifact.sessionId && ctx.onOpenChat(artifact.sessionId)
+      }
+      title={artifact.sessionTitle}
+    >
       <span className="flex min-w-0 flex-col">
         <span className="truncate">{artifact.sessionTitle}</span>
         <span className="truncate text-[0.6875rem] font-normal text-(--ui-text-tertiary)">
