@@ -1322,6 +1322,7 @@ export const ja = defineLocale({
     nav: {
       'new-session': '新しいセッション',
       skills: 'スキルとツール',
+      matters: '案件',
       messaging: 'メッセージング',
       artifacts: 'アーティファクト'
     },

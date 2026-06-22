@@ -20,6 +20,10 @@ import type {
   LogsResponse,
   LegalAssistantSettings,
   LegalAssistantSettingsResponse,
+  MatterCreatePayload,
+  MatterResponse,
+  MattersResponse,
+  MatterUpdatePayload,
   MemoryProviderConfig,
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
@@ -81,6 +85,12 @@ export type {
   LogsResponse,
   LegalAssistantSettings,
   LegalAssistantSettingsResponse,
+  MatterCreatePayload,
+  MatterFile,
+  MatterRecord,
+  MatterResponse,
+  MattersResponse,
+  MatterUpdatePayload,
   MemoryProviderConfig,
   MessagingEnvVarInfo,
   MessagingHomeChannel,
@@ -613,6 +623,47 @@ export function updateLegalAssistantSettings(
     path: '/api/legal-assistant/settings',
     method: 'PUT',
     body: { settings }
+  })
+}
+
+export function listMatters(): Promise<MattersResponse> {
+  return window.hermesDesktop.api<MattersResponse>({
+    ...profileScoped(),
+    path: '/api/matters'
+  })
+}
+
+export function createMatter(body: MatterCreatePayload): Promise<MatterResponse> {
+  return window.hermesDesktop.api<MatterResponse>({
+    ...profileScoped(),
+    path: '/api/matters',
+    method: 'POST',
+    body
+  })
+}
+
+export function updateMatter(matterId: string, body: MatterUpdatePayload): Promise<MatterResponse> {
+  return window.hermesDesktop.api<MatterResponse>({
+    ...profileScoped(),
+    path: `/api/matters/${encodeURIComponent(matterId)}`,
+    method: 'PUT',
+    body
+  })
+}
+
+export function indexMatter(matterId: string): Promise<MatterResponse> {
+  return window.hermesDesktop.api<MatterResponse>({
+    ...profileScoped(),
+    path: `/api/matters/${encodeURIComponent(matterId)}/index`,
+    method: 'POST'
+  })
+}
+
+export function deleteMatter(matterId: string): Promise<{ ok: boolean }> {
+  return window.hermesDesktop.api<{ ok: boolean }>({
+    ...profileScoped(),
+    path: `/api/matters/${encodeURIComponent(matterId)}`,
+    method: 'DELETE'
   })
 }
 

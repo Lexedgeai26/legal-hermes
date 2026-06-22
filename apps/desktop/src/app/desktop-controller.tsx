@@ -135,6 +135,7 @@ const AgentsView = lazy(async () => ({ default: (await import('./agents')).Agent
 const ArtifactsView = lazy(async () => ({ default: (await import('./artifacts')).ArtifactsView }))
 const CommandCenterView = lazy(async () => ({ default: (await import('./command-center')).CommandCenterView }))
 const CronView = lazy(async () => ({ default: (await import('./cron')).CronView }))
+const MattersView = lazy(async () => ({ default: (await import('./matters')).MattersView }))
 const MessagingView = lazy(async () => ({ default: (await import('./messaging')).MessagingView }))
 const ProfilesView = lazy(async () => ({ default: (await import('./profiles')).ProfilesView }))
 const SettingsView = lazy(async () => ({ default: (await import('./settings')).SettingsView }))
@@ -1182,6 +1183,14 @@ export function DesktopController() {
               </Suspense>
             }
             path="skills"
+          />
+          <Route
+            element={
+              <Suspense fallback={null}>
+                <MattersView />
+              </Suspense>
+            }
+            path="matters"
           />
           <Route
             element={

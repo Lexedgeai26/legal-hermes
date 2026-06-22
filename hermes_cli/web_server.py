@@ -732,6 +732,29 @@ class LegalAssistantSettingsUpdate(BaseModel):
     profile: Optional[str] = None
 
 
+class MatterCreateRequest(BaseModel):
+    name: str
+    folder_path: str
+    client_name: str = ""
+    matter_type: str = "general"
+    court_or_authority: str = ""
+    role: str = ""
+    notes: str = ""
+    profile: Optional[str] = None
+
+
+class MatterUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    folder_path: Optional[str] = None
+    client_name: Optional[str] = None
+    matter_type: Optional[str] = None
+    court_or_authority: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    profile: Optional[str] = None
+
+
 class TelegramOnboardingStart(BaseModel):
     bot_name: Optional[str] = None
 
@@ -5771,6 +5794,96 @@ async def update_legal_assistant_settings(body: LegalAssistantSettingsUpdate, pr
             return {"ok": True, "settings": cfg["legal_assistant"]}
     except Exception as exc:
         _log.exception("PUT /api/legal-assistant/settings failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/matters")
+async def list_matters(profile: Optional[str] = None):
+    try:
+        with _profile_scope(profile):
+            from hermes_cli.matters import load_matters
+
+            return {"matters": [matter.to_dict() for matter in load_matters()]}
+    except Exception as exc:
+        _log.exception("GET /api/matters failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/matters")
+async def create_matter_endpoint(body: MatterCreateRequest, profile: Optional[str] = None):
+    try:
+        with _profile_scope(body.profile or profile):
+            from hermes_cli.matters import create_matter, index_matter
+
+            matter = create_matter(body.dict(exclude={"profile"}))
+            matter = index_matter(matter.id)
+            return {"ok": True, "matter": matter.to_dict()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _log.exception("POST /api/matters failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/matters/{matter_id}")
+async def get_matter_endpoint(matter_id: str, profile: Optional[str] = None):
+    try:
+        with _profile_scope(profile):
+            from hermes_cli.matters import get_matter
+
+            return {"matter": get_matter(matter_id).to_dict()}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    except Exception as exc:
+        _log.exception("GET /api/matters/%s failed", matter_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.put("/api/matters/{matter_id}")
+async def update_matter_endpoint(matter_id: str, body: MatterUpdateRequest, profile: Optional[str] = None):
+    try:
+        with _profile_scope(body.profile or profile):
+            from hermes_cli.matters import update_matter
+
+            data = body.dict(exclude_unset=True, exclude={"profile"})
+            return {"ok": True, "matter": update_matter(matter_id, data).to_dict()}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _log.exception("PUT /api/matters/%s failed", matter_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/matters/{matter_id}/index")
+async def index_matter_endpoint(matter_id: str, profile: Optional[str] = None):
+    try:
+        with _profile_scope(profile):
+            from hermes_cli.matters import index_matter
+
+            return {"ok": True, "matter": index_matter(matter_id).to_dict()}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _log.exception("POST /api/matters/%s/index failed", matter_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/api/matters/{matter_id}")
+async def delete_matter_endpoint(matter_id: str, profile: Optional[str] = None):
+    try:
+        with _profile_scope(profile):
+            from hermes_cli.matters import delete_matter
+
+            delete_matter(matter_id)
+            return {"ok": True}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    except Exception as exc:
+        _log.exception("DELETE /api/matters/%s failed", matter_id)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

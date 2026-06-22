@@ -1213,6 +1213,7 @@ export const en: Translations = {
     nav: {
       'new-session': 'New session',
       skills: 'Skills & Tools',
+      matters: 'Matters',
       messaging: 'Messaging',
       artifacts: 'Artifacts'
     },

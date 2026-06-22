@@ -202,6 +202,53 @@ export interface LegalAssistantSettingsResponse {
   settings: LegalAssistantSettings
 }
 
+export interface MatterFile {
+  extension: string
+  modified_at: number
+  name: string
+  path: string
+  size: number
+}
+
+export interface MatterRecord {
+  client_name: string
+  court_or_authority: string
+  created_at: number
+  file_count: number
+  files: MatterFile[]
+  folder_path: string
+  id: string
+  indexed_at: number | null
+  matter_type: string
+  name: string
+  notes: string
+  role: string
+  skipped_count: number
+  status: string
+  updated_at: number
+}
+
+export interface MattersResponse {
+  matters: MatterRecord[]
+}
+
+export interface MatterResponse {
+  matter: MatterRecord
+  ok?: boolean
+}
+
+export interface MatterCreatePayload {
+  client_name?: string
+  court_or_authority?: string
+  folder_path: string
+  matter_type?: string
+  name: string
+  notes?: string
+  role?: string
+}
+
+export type MatterUpdatePayload = Partial<MatterCreatePayload & { status: string }>
+
 export interface GmailOAuthConnectResponse {
   email: string
   ok: boolean
