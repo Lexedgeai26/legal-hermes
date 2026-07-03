@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
 import { Loader } from '@/components/ui/loader'
 import { LogView } from '@/components/ui/log-view'
@@ -96,6 +97,10 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(s / 60)
 
   return `${m}:${String(s - m * 60).padStart(2, '0')}`
+}
+
+function recentInstallerLines(log: DesktopBootstrapState['log'], limit = 6): DesktopBootstrapState['log'] {
+  return log.filter(entry => entry.line.trim().length > 0).slice(-limit)
 }
 
 function StageRow({ descriptor, result, isCurrent, now }: StageRowProps) {
@@ -410,18 +415,32 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
   const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
   const currentStartedAt = currentStage ? state.stages[currentStage]?.startedAt : null
   const currentElapsed = typeof currentStartedAt === 'number' ? formatElapsed(now - currentStartedAt) : ''
+  const recentLines = recentInstallerLines(state.log)
 
   return (
     <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-background/90 backdrop-blur-md p-4">
-      <div className="flex w-full max-w-2xl max-h-[90vh] flex-col rounded-xl border border-(--stroke-nous) bg-card shadow-nous">
+      <div className="flex w-full max-w-3xl max-h-[90vh] flex-col rounded-xl border border-(--stroke-nous) bg-card shadow-nous">
         {/* Header -- always visible, never scrolls */}
         <div className="flex-shrink-0 p-8 pb-4">
-          <h2 className="text-2xl font-semibold tracking-tight">
-            {failed ? copy.failedTitle : state.active ? copy.settingUpTitle : copy.finishingTitle}
-          </h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            {failed ? copy.failedDesc : copy.activeDesc}
-          </p>
+          <div className="flex items-start gap-4">
+            <BrandMark className="size-14 rounded-lg border border-border shadow-sm" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+                LexEdge Legal Hermes Agent
+              </div>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+                {failed ? copy.failedTitle : state.active ? copy.settingUpTitle : copy.finishingTitle}
+              </h2>
+              <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                {failed ? copy.failedDesc : copy.activeDesc}
+              </p>
+              {!failed && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Built on Hermes Agent. Keep this window open while setup downloads and configures the local runtime.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Scrollable middle: progress, stages, error block, log */}
@@ -449,6 +468,30 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
             <div className="mb-4 flex items-center gap-2.5 text-sm text-muted-foreground">
               <Loader className="size-5" type="lemniscate-bloom" />
               <span>{copy.fetchingManifest}</span>
+            </div>
+          )}
+
+          {state.active && (
+            <div className="mb-4 rounded-lg border bg-muted/30 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium uppercase tracking-[0.14em] text-muted-foreground">Recent activity</span>
+                <span className="truncate text-muted-foreground">
+                  {currentStage ? formatStageName(currentStage) : copy.fetchingManifest}
+                  {currentElapsed && ` · ${currentElapsed}`}
+                </span>
+              </div>
+              <div className="rounded-md bg-background/80 px-3 py-2 font-mono text-[11px] leading-5 text-muted-foreground">
+                {recentLines.length === 0 ? (
+                  <div>{copy.noOutput}</div>
+                ) : (
+                  recentLines.map((entry, i) => (
+                    <div className="truncate" key={`${entry.ts}-${i}`}>
+                      {entry.stage ? <span className="text-muted-foreground/60">[{entry.stage}] </span> : null}
+                      <span>{entry.line}</span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           )}
 

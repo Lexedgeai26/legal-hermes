@@ -97,6 +97,24 @@ const PROVIDER_CHOICES = [
   }
 ] as const
 
+const PROVIDER_KEY_ENV_FALLBACKS: Array<{ env: string; match: RegExp }> = [
+  { env: 'OPENROUTER_API_KEY', match: /openrouter/i },
+  { env: 'GEMINI_API_KEY', match: /(gemini|google)/i },
+  { env: 'ANTHROPIC_API_KEY', match: /(anthropic|claude)/i },
+  { env: 'OPENAI_API_KEY', match: /openai(?!.*codex)/i },
+  { env: 'XAI_API_KEY', match: /\bxai\b|grok/i },
+  { env: 'DEEPSEEK_API_KEY', match: /deepseek/i },
+  { env: 'MISTRAL_API_KEY', match: /mistral/i },
+  { env: 'GROQ_API_KEY', match: /groq/i },
+  { env: 'TOGETHER_API_KEY', match: /together/i },
+  { env: 'PERPLEXITY_API_KEY', match: /perplexity/i },
+  { env: 'COHERE_API_KEY', match: /cohere/i },
+  { env: 'FIREWORKS_API_KEY', match: /fireworks/i },
+  { env: 'NOVITA_API_KEY', match: /novita/i },
+  { env: 'HUGGINGFACE_API_KEY', match: /huggingface/i },
+  { env: 'OLLAMA_CLOUD_API_KEY', match: /ollama-cloud/i }
+]
+
 type LegalSkillGroup = {
   categories: readonly string[]
   description: string
@@ -305,6 +323,18 @@ function providerPriority(provider: ModelOptionProvider): number {
   return index >= 0 ? index : PROVIDER_CHOICES.length + 1
 }
 
+function providerKeyEnv(provider: ModelOptionProvider | null): string {
+  if (!provider) {
+    return ''
+  }
+  const declared = (provider.key_env || '').trim()
+  if (declared) {
+    return declared
+  }
+  const identity = `${provider.slug} ${provider.name}`
+  return PROVIDER_KEY_ENV_FALLBACKS.find(item => item.match.test(identity))?.env ?? ''
+}
+
 function providerHint(provider: ModelOptionProvider): string {
   const common = PROVIDER_CHOICES.find(choice => choice.match.test(provider.slug) || choice.match.test(provider.name))
   if (common) {
@@ -313,8 +343,9 @@ function providerHint(provider: ModelOptionProvider): string {
   if (provider.authenticated) {
     return 'Already connected in Hermes.'
   }
-  if (provider.auth_type === 'api_key' && provider.key_env) {
-    return `Paste ${provider.key_env} to connect this provider.`
+  const keyEnv = providerKeyEnv(provider)
+  if (keyEnv) {
+    return `Paste ${keyEnv} to connect this provider.`
   }
   return `Supported by Hermes. Setup type: ${provider.auth_type || 'external'}.`
 }
@@ -326,7 +357,7 @@ function providerReady(provider: ModelOptionProvider | null, apiKey: string): bo
   if (provider.authenticated) {
     return true
   }
-  return Boolean(provider.key_env && apiKey.trim())
+  return Boolean(providerKeyEnv(provider) && apiKey.trim())
 }
 
 function isValidateEndpointUnavailable(error: unknown): boolean {
@@ -521,8 +552,8 @@ export function LawyerOnboardingWizard({
         if (priority !== 0) {
           return priority
         }
-        const aConnectable = a.authenticated || (a.auth_type === 'api_key' && a.key_env)
-        const bConnectable = b.authenticated || (b.auth_type === 'api_key' && b.key_env)
+        const aConnectable = a.authenticated || Boolean(providerKeyEnv(a))
+        const bConnectable = b.authenticated || Boolean(providerKeyEnv(b))
         if (aConnectable !== bConnectable) {
           return aConnectable ? -1 : 1
         }
@@ -573,7 +604,7 @@ export function LawyerOnboardingWizard({
             }
             const sorted = [...rows].sort((a, b) => providerPriority(a) - providerPriority(b))
             const preferred =
-              sorted.find(provider => provider.authenticated || (provider.auth_type === 'api_key' && provider.key_env)) ??
+              sorted.find(provider => provider.authenticated || Boolean(providerKeyEnv(provider))) ??
               sorted[0]
             return preferred?.slug ?? ''
           })
@@ -647,6 +678,7 @@ export function LawyerOnboardingWizard({
 
   const trimmedProfileName = normaliseProfileName(profileName)
   const profileNameInvalid = !trimmedProfileName || !PROFILE_NAME_RE.test(trimmedProfileName)
+  const selectedProviderKeyEnv = providerKeyEnv(selectedProvider)
   const modelReady = providerReady(selectedProvider, apiKey)
   const stepOrder: WizardStep[] = ['practice', 'model', 'profile', 'skills', 'terms', 'finish']
   const currentStepIndex = stepOrder.indexOf(step)
@@ -764,11 +796,11 @@ export function LawyerOnboardingWizard({
     setMessage('Checking the AI service and choosing a model...')
     try {
       if (!selectedProvider.authenticated) {
-        if (!selectedProvider.key_env) {
+        if (!selectedProviderKeyEnv) {
           throw new Error(`${selectedProvider.name} cannot be configured with an API key here.`)
         }
         try {
-          const probe = await validateProviderCredential(selectedProvider.key_env, apiKey.trim(), apiKey.trim())
+          const probe = await validateProviderCredential(selectedProviderKeyEnv, apiKey.trim(), apiKey.trim())
           if (!probe.ok) {
             throw new Error(probe.message || 'The API key could not be verified.')
           }
@@ -778,7 +810,7 @@ export function LawyerOnboardingWizard({
           }
           setMessage('This backend cannot live-test the key yet. Saving it locally and continuing setup...')
         }
-        await setEnvVar(selectedProvider.key_env, apiKey.trim())
+        await setEnvVar(selectedProviderKeyEnv, apiKey.trim())
       }
 
       const refreshed = await getGlobalModelOptions({ refresh: true })
@@ -1075,7 +1107,7 @@ export function LawyerOnboardingWizard({
                   {providerRows.map(provider => {
                     const selected = provider.slug === selectedProvider?.slug
                     const connected = Boolean(provider.authenticated)
-                    const connectable = connected || (provider.auth_type === 'api_key' && provider.key_env)
+                    const connectable = connected || Boolean(providerKeyEnv(provider))
                     return (
                       <button
                         className={cn(
@@ -1116,14 +1148,14 @@ export function LawyerOnboardingWizard({
                   <Input
                     autoComplete="off"
                     className="mt-2"
-                    disabled={busy || Boolean(selectedProvider?.authenticated) || !selectedProvider?.key_env}
+                    disabled={busy || Boolean(selectedProvider?.authenticated) || !selectedProviderKeyEnv}
                     id="lexedge-api-key"
                     onChange={event => setApiKey(event.target.value)}
                     placeholder={
                       selectedProvider?.authenticated
                         ? 'Already connected'
-                        : selectedProvider?.key_env
-                          ? selectedProvider.key_env
+                        : selectedProviderKeyEnv
+                          ? selectedProviderKeyEnv
                           : 'Advanced setup required'
                     }
                     type="password"
@@ -1132,8 +1164,8 @@ export function LawyerOnboardingWizard({
                   <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
                     {selectedProvider?.authenticated
                       ? 'This AI service is already connected. Continue to run the model test.'
-                      : selectedProvider?.key_env
-                        ? `This saves ${selectedProvider.key_env} locally on this computer.`
+                      : selectedProviderKeyEnv
+                        ? `This saves ${selectedProviderKeyEnv} locally on this computer.`
                         : 'This provider is supported by Hermes but needs its own advanced setup. Pick an API-key provider to finish onboarding here.'}
                   </p>
                 </div>

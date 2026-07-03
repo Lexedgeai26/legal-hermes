@@ -263,6 +263,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
       "shortcutName": "LexEdge AI",
       "uninstallDisplayName": "LexEdge AI",
       "warningsAsErrors": false
