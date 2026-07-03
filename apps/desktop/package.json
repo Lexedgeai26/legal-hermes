@@ -2,7 +2,7 @@
   "name": "lexedge-ai",
   "productName": "LexEdge AI",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "LexEdge AI legal assistant desktop app.",
   "author": "LexEdge AI Labs Private Limited",
   "type": "module",
