@@ -1357,13 +1357,21 @@ function Install-Repository {
                 New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
                 Expand-Archive -Path $SourceArchive -DestinationPath $extractPath -Force
 
-                $extractedDir = Get-ChildItem $extractPath -Directory | Select-Object -First 1
-                if (-not $extractedDir) {
-                    throw "Source archive did not contain a top-level source directory"
+                $repoMarker = Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter "batch_runner.py" -ErrorAction SilentlyContinue |
+                    Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName "pyproject.toml") } |
+                    Select-Object -First 1
+                if (-not $repoMarker) {
+                    $topLevelNames = (Get-ChildItem -LiteralPath $extractPath -Force -ErrorAction SilentlyContinue |
+                        Select-Object -ExpandProperty Name) -join ", "
+                    throw "Source archive did not contain a Hermes repository root with batch_runner.py. Extracted entries: $topLevelNames"
                 }
 
+                $sourceRoot = $repoMarker.DirectoryName
                 New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) -ErrorAction SilentlyContinue | Out-Null
-                Move-Item $extractedDir.FullName $InstallDir -Force
+                New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+                Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object {
+                    Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Recurse -Force
+                }
                 Remove-Item -Recurse -Force $extractPath -ErrorAction SilentlyContinue
 
                 Push-Location $InstallDir
