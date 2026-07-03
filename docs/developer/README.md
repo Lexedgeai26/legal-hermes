@@ -83,5 +83,5 @@ npm --workspace apps/desktop run test:ui
 - [AI, Agents, Skills, and Providers](ai-agents-skills-providers.md)
 - [Data, Security, and Enterprise Readiness](data-security-enterprise.md)
 - [Build, Release, and Installed App Runbook](build-release-runbook.md)
+- [Desktop Installer Builds for macOS and Windows](desktop-installer-builds.md)
 - [Roadmap for Future Enterprise Features](enterprise-roadmap.md)
-

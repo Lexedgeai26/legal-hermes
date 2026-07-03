@@ -18,7 +18,7 @@
     "profile:main": "wait-on http://127.0.0.1:5174 && cross-env XCURSOR_SIZE=24 HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron --inspect=9229 .",
     "profile:main:cpu": "wait-on http://127.0.0.1:5174 && cross-env XCURSOR_SIZE=24 NODE_OPTIONS=--cpu-prof HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron .",
     "start": "npm run build && electron .",
-    "build": "node scripts/assert-root-install.cjs && node scripts/write-build-stamp.cjs && node scripts/stage-native-deps.cjs && tsc -b && vite build && npm run postbuild",
+    "build": "node scripts/assert-root-install.cjs && node scripts/write-build-stamp.cjs && node scripts/stage-native-deps.cjs && node scripts/stage-source-archive.cjs && tsc -b && vite build && npm run postbuild",
     "postbuild": "node scripts/assert-dist-built.cjs",
     "prebuilder": "node scripts/patch-electron-builder-mac-binary.cjs",
     "builder": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/run-electron-builder.cjs",
@@ -158,7 +158,16 @@
       "assets/**",
       "electron/**",
       "public/**",
-      "package.json"
+      "package.json",
+      "!**/.env*",
+      "!**/*.db",
+      "!**/*.sqlite",
+      "!**/*.sqlite3",
+      "!**/*.map",
+      "!**/*credential*",
+      "!**/*secret*",
+      "!electron/**/*.test.cjs",
+      "!electron/**/*.test.js"
     ],
     "beforeBuild": "scripts/before-build.cjs",
     "beforePack": "scripts/before-pack.cjs",
@@ -171,6 +180,14 @@
       {
         "from": "build/native-deps",
         "to": "native-deps"
+      },
+      {
+        "from": "../../scripts/install.ps1",
+        "to": "bootstrap/install.ps1"
+      },
+      {
+        "from": "build/hermes-agent-source.zip",
+        "to": "bootstrap/hermes-agent-source.zip"
       },
       {
         "from": "assets/icon.ico",

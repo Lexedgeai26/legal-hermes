@@ -22,6 +22,7 @@ import type {
   LogsResponse,
   LegalAssistantSettings,
   LegalAssistantSettingsResponse,
+  LexEdgePracticeCatalog,
   MatterCreatePayload,
   MatterResponse,
   MattersResponse,
@@ -486,6 +487,53 @@ export function getSkills(): Promise<SkillInfo[]> {
   })
 }
 
+export interface ClaudeImportItem {
+  name: string
+  slug: string
+  kind: 'agent' | 'command' | 'skill'
+  category: string
+}
+
+export interface ClaudeImportResult {
+  name: string
+  installed?: boolean
+  path?: string
+  reason?: string
+}
+
+export interface ClaudeImportReport {
+  plugin: string
+  category: string
+  counts: { skills: number; commands: number; agents: number; total: number }
+  mcp_servers_needed: string[]
+  warnings: string[]
+  items: ClaudeImportItem[]
+  dry_run: boolean
+  installed?: ClaudeImportResult[]
+  next_step?: string
+}
+
+/** Convert (and optionally install) a Claude Code plugin or skill.
+ * dryRun previews the conversion without writing anything. */
+export function importClaudeSkills(params: {
+  source: string
+  category?: string
+  dryRun?: boolean
+  force?: boolean
+}): Promise<ClaudeImportReport> {
+  return window.hermesDesktop.api<ClaudeImportReport>({
+    ...profileScoped(),
+    path: '/api/skills/import-claude',
+    method: 'POST',
+    body: {
+      source: params.source,
+      category: params.category || null,
+      dry_run: Boolean(params.dryRun),
+      force: Boolean(params.force)
+    }
+  })
+}
+
 export function toggleSkill(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean; name: string; enabled: boolean }>({
     ...profileScoped(),
@@ -796,6 +844,14 @@ export function updateProfileSoul(name: string, content: string): Promise<{ ok: 
   })
 }
 
+export function applyProfileSkillSelection(name: string, keepSkills: string[]): Promise<{ ok: boolean; skills_disabled: number }> {
+  return window.hermesDesktop.api<{ ok: boolean; skills_disabled: number }>({
+    path: `/api/profiles/${encodeURIComponent(name)}/skills/selection`,
+    method: 'POST',
+    body: { keep_skills: keepSkills }
+  })
+}
+
 export function getProfileSetupCommand(name: string): Promise<ProfileSetupCommand> {
   return window.hermesDesktop.api<ProfileSetupCommand>({
     path: `/api/profiles/${encodeURIComponent(name)}/setup-command`
@@ -868,6 +924,30 @@ export function completeOnboarding(complete = true): Promise<OnboardingStatus> {
     path: '/api/onboarding/complete',
     method: 'POST',
     body: { complete }
+  })
+}
+
+export function resetOnboarding(): Promise<OnboardingStatus> {
+  return window.hermesDesktop.api<OnboardingStatus>({
+    path: '/api/onboarding/reset',
+    method: 'POST'
+  })
+}
+
+export function getLexEdgePracticeCatalog(): Promise<LexEdgePracticeCatalog> {
+  return window.hermesDesktop.api<LexEdgePracticeCatalog>({
+    path: '/api/lexedge/practice/catalog'
+  })
+}
+
+export function saveLexEdgePracticeProfile(
+  profileName: string,
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; path: string; profile_name: string }> {
+  return window.hermesDesktop.api<{ ok: boolean; path: string; profile_name: string }>({
+    path: '/api/lexedge/practice/profile',
+    method: 'POST',
+    body: { profile_name: profileName, payload }
   })
 }
 

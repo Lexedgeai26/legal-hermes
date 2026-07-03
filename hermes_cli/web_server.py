@@ -9712,6 +9712,64 @@ def _profile_cli_args(profile: Optional[str]) -> List[str]:
     return ["-p", profiles_mod.normalize_profile_name(requested)]
 
 
+class ClaudeImportRequest(BaseModel):
+    source: str
+    category: Optional[str] = None
+    dry_run: bool = False
+    force: bool = False
+    profile: Optional[str] = None
+
+
+@app.post("/api/skills/import-claude")
+async def import_claude_skills(body: ClaudeImportRequest, profile: Optional[str] = None):
+    """Convert a Claude Code plugin/skill (local path or git URL) into Hermes
+    skills. Runs the CLI path (`hermes skills import --json`) in a
+    profile-aware subprocess so installs are security-scanned. ``dry_run``
+    returns the conversion preview without writing anything."""
+    source = (body.source or "").strip()
+    if not source:
+        raise HTTPException(status_code=400, detail="Paste a folder path or git link to a Claude plugin or skill.")
+
+    cmd = [sys.executable, "-m", "hermes_cli.main",
+           *_profile_cli_args(body.profile or profile),
+           "skills", "import", source, "--json"]
+    if body.category:
+        cmd += ["--category", body.category.strip()]
+    if body.dry_run:
+        cmd += ["--dry-run"]
+    if body.force:
+        cmd += ["--force"]
+
+    def _run() -> subprocess.CompletedProcess:
+        return subprocess.run(
+            cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+            timeout=600, env={**os.environ, "HERMES_NONINTERACTIVE": "1"},
+        )
+
+    try:
+        proc = await asyncio.to_thread(_run)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail=(
+            "The import is taking too long — the source may be very large or "
+            "unreachable. Please check the link and try again."))
+    except Exception as exc:
+        _log.exception("Claude skill import failed to start")
+        raise HTTPException(status_code=500, detail=f"The import could not start: {exc}")
+
+    try:
+        report = json.loads(proc.stdout or "{}")
+    except ValueError:
+        report = {}
+    if proc.returncode != 0 or not report or report.get("error"):
+        reason = (report.get("error") if isinstance(report, dict) else None) \
+            or (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or ["unknown error"]
+        reason = reason if isinstance(reason, str) else reason[0]
+        raise HTTPException(status_code=422, detail=(
+            "We couldn't read that source as a Claude plugin or skill. "
+            f"Details: {reason}"))
+    return report
+
+
 @app.post("/api/skills/hub/install")
 async def install_skill_hub(body: SkillInstallRequest, profile: Optional[str] = None):
     identifier = (body.identifier or "").strip()
@@ -10139,6 +10197,10 @@ class ProfileSoulUpdate(BaseModel):
     content: str
 
 
+class ProfileSkillSelectionUpdate(BaseModel):
+    keep_skills: List[str] = []
+
+
 class ProfileActiveUpdate(BaseModel):
     name: str
 
@@ -10163,6 +10225,11 @@ class OnboardingStepUpdate(BaseModel):
 
 class OnboardingCompleteUpdate(BaseModel):
     complete: bool = True
+
+
+class LexEdgePracticeProfileUpdate(BaseModel):
+    profile_name: str
+    payload: Dict[str, Any]
 
 
 _ONBOARDING_REQUIRED_STEPS = (
@@ -10291,6 +10358,41 @@ async def complete_onboarding_endpoint(body: OnboardingCompleteUpdate):
     state["completed"] = bool(body.complete)
     _write_onboarding_state(state)
     return _onboarding_status_payload()
+
+
+@app.post("/api/onboarding/reset")
+async def reset_onboarding_endpoint():
+    path = _onboarding_state_path()
+    try:
+        path.unlink(missing_ok=True)
+    except Exception as exc:
+        _log.exception("POST /api/onboarding/reset failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return _onboarding_status_payload()
+
+
+@app.get("/api/lexedge/practice/catalog")
+async def get_lexedge_practice_catalog():
+    try:
+        from hermes_cli.lexedge_practice_db import catalog_payload
+
+        return catalog_payload()
+    except Exception as exc:
+        _log.exception("GET /api/lexedge/practice/catalog failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/lexedge/practice/profile")
+async def save_lexedge_practice_profile(body: LexEdgePracticeProfileUpdate):
+    try:
+        from hermes_cli.lexedge_practice_db import save_profile
+
+        return save_profile(body.profile_name, body.payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _log.exception("POST /api/lexedge/practice/profile failed")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 def _profile_attr(info, name: str, default: Any = None) -> Any:
@@ -10491,6 +10593,7 @@ def _disable_unselected_skills(profile_dir: Path, keep: List[str]) -> int:
 
     keep_set = {s.strip() for s in keep if s and s.strip()}
     disabled_count = 0
+    changed = False
     token = set_hermes_home_override(str(profile_dir))
     try:
         installed: List[str] = []
@@ -10500,11 +10603,16 @@ def _disable_unselected_skills(profile_dir: Path, keep: List[str]) -> int:
                 installed.append(md.parent.name)
         cfg = load_config()
         disabled = get_disabled_skills(cfg)
+        for name in keep_set:
+            if name in disabled:
+                disabled.discard(name)
+                changed = True
         for name in installed:
             if name not in keep_set and name not in disabled:
                 disabled.add(name)
                 disabled_count += 1
-        if disabled_count:
+                changed = True
+        if changed:
             save_disabled_skills(cfg, disabled)
     finally:
         reset_hermes_home_override(token)
@@ -10807,6 +10915,17 @@ async def update_profile_soul(name: str, body: ProfileSoulUpdate):
         _log.exception("PUT /api/profiles/%s/soul failed", name)
         raise HTTPException(status_code=500, detail=f"Could not write SOUL.md: {e}")
     return {"ok": True}
+
+
+@app.post("/api/profiles/{name}/skills/selection")
+async def update_profile_skill_selection(name: str, body: ProfileSkillSelectionUpdate):
+    profile_dir = _resolve_profile_dir(name)
+    try:
+        disabled = _disable_unselected_skills(profile_dir, body.keep_skills)
+    except Exception as exc:
+        _log.exception("POST /api/profiles/%s/skills/selection failed", name)
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "skills_disabled": disabled}
 
 
 @app.put("/api/profiles/{name}/description")

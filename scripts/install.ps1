@@ -23,6 +23,11 @@ param(
     # exact ref.  Precedence: Commit > Tag > Branch.
     [string]$Commit = "",
     [string]$Tag = "",
+    # Optional offline/source-bundle path used by public desktop installers.
+    # When present, the repository stage extracts this archive into InstallDir
+    # instead of cloning from GitHub. The archive must contain a single top-level
+    # source directory.
+    [string]$SourceArchive = "",
     [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
     [string]$InstallDir = $(if ($env:HERMES_HOME) { "$env:HERMES_HOME\hermes-agent" } else { "$env:LOCALAPPDATA\hermes\hermes-agent" }),
 
@@ -1337,25 +1342,71 @@ function Install-Repository {
 
     if (-not $didUpdate) {
         $cloneSuccess = $false
+        $usedSourceArchive = $false
+
+        if ($SourceArchive) {
+            if (-not (Test-Path -LiteralPath $SourceArchive)) {
+                throw "Source archive not found: $SourceArchive"
+            }
+            if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
+            Write-Info "Installing repository from bundled source archive..."
+            try {
+                $archiveLabel = [IO.Path]::GetFileNameWithoutExtension($SourceArchive)
+                $extractPath = Join-Path $env:TEMP ("hermes-agent-source-" + $archiveLabel + "-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+                if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+                New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
+                Expand-Archive -Path $SourceArchive -DestinationPath $extractPath -Force
+
+                $extractedDir = Get-ChildItem $extractPath -Directory | Select-Object -First 1
+                if (-not $extractedDir) {
+                    throw "Source archive did not contain a top-level source directory"
+                }
+
+                New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) -ErrorAction SilentlyContinue | Out-Null
+                Move-Item $extractedDir.FullName $InstallDir -Force
+                Remove-Item -Recurse -Force $extractPath -ErrorAction SilentlyContinue
+
+                Push-Location $InstallDir
+                try {
+                    git -c windows.appendAtomically=false init 2>$null
+                    git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null
+                    git -c windows.appendAtomically=false config core.autocrlf false 2>$null
+                    git remote add origin $RepoUrlHttps 2>$null
+                } finally {
+                    Pop-Location
+                }
+
+                $cloneSuccess = $true
+                $usedSourceArchive = $true
+                Write-Success "Bundled source archive extracted"
+            } catch {
+                Write-Err "Bundled source archive install failed: $_"
+                throw
+            }
+        }
 
         # Fix Windows git "copy-fd: write returned: Invalid argument" error.
         # Git for Windows can fail on atomic file operations (hook templates,
         # config lock files) due to antivirus, OneDrive, or NTFS filter drivers.
         # The -c flag injects config before any file I/O occurs.
-        Write-Info "Configuring git for Windows compatibility..."
-        $env:GIT_CONFIG_COUNT = "1"
-        $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
-        $env:GIT_CONFIG_VALUE_0 = "false"
-        git config --global windows.appendAtomically false 2>$null
+        if (-not $cloneSuccess) {
+            Write-Info "Configuring git for Windows compatibility..."
+            $env:GIT_CONFIG_COUNT = "1"
+            $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
+            $env:GIT_CONFIG_VALUE_0 = "false"
+            git config --global windows.appendAtomically false 2>$null
+        }
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
-        Write-Info "Trying SSH clone..."
-        $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
-        try {
-            Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlSsh $InstallDir }
-            if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
-        } catch { }
-        $env:GIT_SSH_COMMAND = $null
+        if (-not $cloneSuccess) {
+            Write-Info "Trying SSH clone..."
+            $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
+            try {
+                Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlSsh $InstallDir }
+                if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
+            } catch { }
+            $env:GIT_SSH_COMMAND = $null
+        }
 
         if (-not $cloneSuccess) {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
@@ -1435,7 +1486,7 @@ function Install-Repository {
     # $Branch's tip, honour the higher-precedence $Commit / $Tag by checking
     # the exact ref out as a detached HEAD.  Skipped for the in-place update
     # path (above) since that already routed via the same precedence.
-    if (-not $didUpdate) {
+    if ((-not $didUpdate) -and (-not $usedSourceArchive)) {
         # Same EAP=Continue wrap as the update path -- git fetch's 'From <url>'
         # info line goes to stderr and would terminate the script under the
         # global EAP=Stop otherwise.  We check $LASTEXITCODE for real errors.

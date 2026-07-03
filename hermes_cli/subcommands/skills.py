@@ -96,6 +96,24 @@ def build_skills_parser(subparsers, *, cmd_skills: Callable) -> None:
     )
     skills_inspect.add_argument("identifier", help="Skill identifier")
 
+    skills_import = skills_subparsers.add_parser(
+        "import", help="Import a Claude plugin/skill/agent as Hermes skills"
+    )
+    skills_import.add_argument("source", help="Local directory or git URL of the Claude plugin/skill")
+    skills_import.add_argument("--category", default="", help="Override category (default: plugin name)")
+    skills_import.add_argument(
+        "--into", choices=["skills", "optional-skills"], default="optional-skills",
+        help="Install target directory",
+    )
+    skills_import.add_argument(
+        "--dry-run", action="store_true", dest="dry_run",
+        help="Convert + report only; write nothing",
+    )
+    skills_import.add_argument(
+        "--force", action="store_true", help="Import even if the security audit flags high-risk patterns",
+    )
+    skills_import.add_argument("--json", action="store_true", help="Print the machine-readable JSON report only")
+
     skills_list = skills_subparsers.add_parser("list", help="List installed skills")
     skills_list.add_argument(
         "--source", default="all", choices=["all", "hub", "builtin", "local"]

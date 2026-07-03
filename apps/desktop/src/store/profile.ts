@@ -224,6 +224,21 @@ export async function ensureGatewayProfile(profile: string | null | undefined): 
   }
 
   const target = normalizeProfileKey(profile)
+  if (target !== 'default') {
+    let profiles = $profiles.get()
+    if (!profiles.some(item => normalizeProfileKey(item.name) === target)) {
+      try {
+        const refreshed = await getProfiles()
+        profiles = refreshed.profiles
+        $profiles.set(profiles)
+      } catch {
+        // Keep the clearer missing-profile error below.
+      }
+    }
+    if (!profiles.some(item => normalizeProfileKey(item.name) === target)) {
+      throw new Error(`Profile "${target}" does not exist.`)
+    }
+  }
 
   if (normalizeProfileKey($activeGatewayProfile.get()) === target && $gateway.get()) {
     return

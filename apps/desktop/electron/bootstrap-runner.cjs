@@ -100,6 +100,25 @@ function installedAgentInstallScript(hermesHome) {
   }
 }
 
+function packagedBootstrapPath(name) {
+  if (!process.resourcesPath) return null
+  const candidate = path.join(process.resourcesPath, 'bootstrap', name)
+  try {
+    fs.accessSync(candidate, fs.constants.R_OK)
+    return candidate
+  } catch {
+    return null
+  }
+}
+
+function packagedInstallScript() {
+  return packagedBootstrapPath(installScriptName())
+}
+
+function packagedSourceArchive() {
+  return packagedBootstrapPath('hermes-agent-source.zip')
+}
+
 function cachedScriptPath(hermesHome, commit) {
   return path.join(bootstrapCacheDir(hermesHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
 }
@@ -187,6 +206,12 @@ async function resolveInstallScript({ installStamp, sourceRepoRoot, hermesHome, 
   if (localScript) {
     emit({ type: 'log', line: `[bootstrap] using local ${installScriptName()} at ${localScript}` })
     return { path: localScript, source: 'local', kind: installScriptKind() }
+  }
+
+  const bundledScript = packagedInstallScript()
+  if (bundledScript) {
+    emit({ type: 'log', line: `[bootstrap] using packaged ${installScriptName()} at ${bundledScript}` })
+    return { path: bundledScript, source: 'packaged', kind: installScriptKind() }
   }
 
   // 2. Packaged path: download from GitHub at the pinned commit (1B's stamp).
@@ -451,6 +476,10 @@ function buildPinArgs(installStamp) {
   }
   if (installStamp && installStamp.branch) {
     args.push('-Branch', installStamp.branch)
+  }
+  const sourceArchive = packagedSourceArchive()
+  if (sourceArchive) {
+    args.push('-SourceArchive', sourceArchive)
   }
   return args
 }
@@ -725,5 +754,7 @@ module.exports = {
   resolveLocalInstallScript,
   resolveInstallScript,
   installedAgentInstallScript,
+  packagedInstallScript,
+  packagedSourceArchive,
   cachedScriptPath
 }

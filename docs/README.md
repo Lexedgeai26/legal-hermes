@@ -16,11 +16,12 @@ LexEdge is built on the MIT-licensed Hermes Agent project by Nous Research:
 - [AI, Agents, Skills, and Providers](developer/ai-agents-skills-providers.md)
 - [Data, Security, and Enterprise Readiness](developer/data-security-enterprise.md)
 - [Build, Release, and Installed App Runbook](developer/build-release-runbook.md)
+- [Desktop Installer Builds for macOS and Windows](developer/desktop-installer-builds.md)
 - [Roadmap for Future Enterprise Features](developer/enterprise-roadmap.md)
 
 ## Existing Product Docs
 
 - [Lawyer onboarding wizard](lexedge-lawyer-onboarding-wizard.md)
 - [WhatsApp legal messaging guide](lexedge-whatsapp-legal-messaging-guide.md)
+- [Importing Claude skills — full guide](claude-skill-import.md)
 - [Help docs](help-docs/)
-

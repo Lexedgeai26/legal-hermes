@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
+import { resetOnboarding } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { cn } from '@/lib/utils'
@@ -21,6 +22,8 @@ import {
 import { appViewForPath, isOverlayView } from '../routes'
 
 import { titlebarButtonClass } from './titlebar'
+
+const FORCE_ONBOARDING_KEY = 'lexedge:onboarding:force'
 
 export interface TitlebarTool {
   id: string
@@ -64,6 +67,49 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
     if (hapticsMuted) {
       window.requestAnimationFrame(() => triggerHaptic('success'))
     }
+  }
+
+  const resetSetup = () => {
+    if (
+      !window.confirm(
+        'Reset LexEdge onboarding and show the setup wizard again? This does not delete chats, profiles, or API keys.'
+      )
+    ) {
+      return
+    }
+
+    triggerHaptic('open')
+    window.localStorage.setItem(FORCE_ONBOARDING_KEY, '1')
+    void resetOnboarding()
+      .catch(error => {
+        window.alert(error instanceof Error ? error.message : 'Could not reset LexEdge onboarding.')
+      })
+      .finally(() => {
+        window.location.reload()
+      })
+  }
+
+  const signOutAndReset = () => {
+    if (
+      !window.confirm(
+        'Log out of the current desktop sign-in and show LexEdge setup again? This does not delete chats or profiles.'
+      )
+    ) {
+      return
+    }
+
+    triggerHaptic('open')
+    window.localStorage.setItem(FORCE_ONBOARDING_KEY, '1')
+    void window.hermesDesktop
+      .oauthLogoutConnectionConfig?.()
+      .catch(() => undefined)
+      .then(() => resetOnboarding())
+      .catch(error => {
+        window.alert(error instanceof Error ? error.message : 'Could not log out or reset LexEdge setup.')
+      })
+      .finally(() => {
+        window.location.reload()
+      })
   }
 
   // Each titlebar button controls the pane physically on its side, so a flip
@@ -125,6 +171,20 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         triggerHaptic('open')
         toggleKeybindPanel()
       }
+    },
+    {
+      icon: <Codicon name="debug-restart" />,
+      id: 'reset-onboarding',
+      label: 'Reset LexEdge setup',
+      onSelect: resetSetup,
+      title: 'Reset onboarding and show setup wizard'
+    },
+    {
+      icon: <Codicon name="sign-out" />,
+      id: 'logout',
+      label: 'Log out',
+      onSelect: signOutAndReset,
+      title: 'Log out and show setup wizard'
     },
     {
       icon: <Codicon name="settings-gear" />,

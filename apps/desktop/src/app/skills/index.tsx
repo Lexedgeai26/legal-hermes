@@ -14,6 +14,7 @@ import { notify, notifyError } from '@/store/notifications'
 import type { SkillInfo, ToolsetInfo } from '@/types/hermes'
 
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey'
+import { ImportClaudeDialog } from './import-claude-dialog'
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
 import { PAGE_INSET_X } from '../layout-constants'
 import { PageSearchShell } from '../page-search-shell'
@@ -81,6 +82,7 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
   const [toolsets, setToolsets] = useState<ToolsetInfo[] | null>(null)
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [savingSkill, setSavingSkill] = useState<string | null>(null)
   const [savingToolset, setSavingToolset] = useState<string | null>(null)
   const [expandedToolset, setExpandedToolset] = useState<string | null>(null)
@@ -242,6 +244,19 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
         <PageLoader label={t.skills.loading} />
       ) : mode === 'skills' ? (
         <div className={cn('h-full overflow-y-auto py-3', PAGE_INSET_X)}>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Have a Claude Code skill or plugin you like? You can bring it in here.
+            </p>
+            <Button onClick={() => setImportOpen(true)} size="sm" type="button" variant="secondary">
+              <Codicon name="cloud-download" size="0.875rem" /> Import Claude skills
+            </Button>
+          </div>
+          <ImportClaudeDialog
+            onImported={() => void refreshCapabilities()}
+            onOpenChange={setImportOpen}
+            open={importOpen}
+          />
           {visibleSkills.length === 0 ? (
             <EmptyState description={t.skills.noSkillsDesc} title={t.skills.noSkillsTitle} />
           ) : (

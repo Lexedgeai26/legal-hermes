@@ -11569,10 +11569,55 @@ def cmd_skills(args):
         from hermes_cli.skills_config import skills_command as skills_config_command
 
         skills_config_command(args)
+    elif getattr(args, "skills_action", None) == "import":
+        _cmd_skills_import(args)
     else:
         from hermes_cli.skills_hub import skills_command
 
         skills_command(args)
+
+
+def _cmd_skills_import(args):
+    """`hermes skills import <path|git-url>` — convert a Claude plugin into
+    Hermes skills and install them locally (security-scanned)."""
+    import json as _json
+    import sys as _sys
+    from hermes_cli.claude_import import run_import
+
+    as_json = getattr(args, "json", False)
+    try:
+        report = run_import(
+            args.source,
+            dry_run=getattr(args, "dry_run", False),
+            category=(getattr(args, "category", "") or None),
+            into=getattr(args, "into", "optional-skills"),
+            force=getattr(args, "force", False),
+        )
+    except Exception as exc:
+        if as_json:
+            print(_json.dumps({"error": str(exc)}))
+            _sys.exit(1)
+        print(f"❌ Import failed: {exc}")
+        return
+
+    if as_json:
+        # machine-readable only — consumed by the desktop app's import endpoint
+        print(_json.dumps(report, indent=2, default=str))
+        return
+
+    c = report.get("counts", {})
+    print(f"\n📦 {report.get('plugin')}{' (dry-run)' if report.get('dry_run') else ''}")
+    print(f"   Converted: {c.get('skills', 0)} skills, {c.get('commands', 0)} commands, "
+          f"{c.get('agents', 0)} agents ({c.get('total', 0)} total)")
+    if report.get("mcp_servers_needed"):
+        print(f"   ⚠ MCP servers needing setup: {', '.join(report['mcp_servers_needed'])}")
+    for w in report.get("warnings", []):
+        print(f"   ⚠ {w}")
+    for r in report.get("installed", []):
+        mark = "✓" if r.get("installed") else "⛔"
+        print(f"   {mark} {r['name']}: {r.get('path') or r.get('reason')}")
+    if report.get("next_step"):
+        print(f"\n→ {report['next_step']}")
 
 
 def cmd_pairing(args):

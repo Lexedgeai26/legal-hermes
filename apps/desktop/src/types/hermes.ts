@@ -587,9 +587,12 @@ export interface ProfileCreatePayload {
   clone_all?: boolean
   clone_from?: null | string
   clone_from_default?: boolean
+  keep_skills?: string[]
+  model?: string
   name: string
   no_skills?: boolean
   practice_role?: null | string
+  provider?: string
 }
 
 export interface ProfileInfo {
@@ -632,6 +635,20 @@ export interface OnboardingStatus {
     practice_workspace: boolean
   }
   updated_at?: null | string
+}
+
+export interface LexEdgePracticeCatalog {
+  groups: Record<string, Record<string, string[]>>
+  jurisdictions: Array<{
+    bench: string
+    country: string
+    court: string
+    court_type: string
+    legal_system: string
+    region: string
+    state: string
+  }>
+  options: Record<string, string[]>
 }
 
 export interface ProfilesResponse {
