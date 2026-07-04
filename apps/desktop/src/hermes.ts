@@ -31,8 +31,6 @@ import type {
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
   MessagingPlatformUpdate,
-  McpCatalogInstallResponse,
-  McpCatalogResponse,
   ModelAssignmentRequest,
   ModelAssignmentResponse,
   ModelInfoResponse,
@@ -549,30 +547,6 @@ export function getToolsets(): Promise<ToolsetInfo[]> {
   return window.hermesDesktop.api<ToolsetInfo[]>({
     ...profileScoped(),
     path: '/api/tools/toolsets'
-  })
-}
-
-export function getMcpCatalog(): Promise<McpCatalogResponse> {
-  return window.hermesDesktop.api<McpCatalogResponse>({
-    ...profileScoped(),
-    path: '/api/mcp/catalog'
-  })
-}
-
-export function installMcpCatalogEntry(params: {
-  enable?: boolean
-  env?: Record<string, string>
-  name: string
-}): Promise<McpCatalogInstallResponse> {
-  return window.hermesDesktop.api<McpCatalogInstallResponse>({
-    ...profileScoped(),
-    path: '/api/mcp/catalog/install',
-    method: 'POST',
-    body: {
-      name: params.name,
-      env: params.env || {},
-      enable: params.enable ?? true
-    }
   })
 }
 

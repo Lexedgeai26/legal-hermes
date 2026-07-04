@@ -760,44 +760,6 @@ export interface ActionStatusResponse {
   running: boolean
 }
 
-export interface McpCatalogEnvSpec {
-  name: string
-  prompt: string
-  required: boolean
-}
-
-export interface McpCatalogEntry {
-  args: string[]
-  auth_type: string
-  bootstrap: string[]
-  command: string | null
-  default_enabled: string[] | null
-  description: string
-  enabled: boolean
-  install_ref: string | null
-  install_url: string | null
-  installed: boolean
-  name: string
-  needs_install: boolean
-  post_install: string
-  required_env: McpCatalogEnvSpec[]
-  source: string
-  transport: string
-  url: string | null
-}
-
-export interface McpCatalogResponse {
-  diagnostics: Array<{ kind: string; message: string; name: string }>
-  entries: McpCatalogEntry[]
-}
-
-export interface McpCatalogInstallResponse {
-  action?: string
-  background: boolean
-  name: string
-  ok: boolean
-}
-
 export interface BackendUpdateCommit {
   sha: string
   summary: string
