@@ -4,13 +4,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { getHermesConfigRecord, type HermesGateway, saveHermesConfig } from '@/hermes'
+import {
+  getActionStatus,
+  getHermesConfigRecord,
+  getMcpCatalog,
+  installMcpCatalogEntry,
+  type HermesGateway,
+  saveHermesConfig
+} from '@/hermes'
 import { useI18n } from '@/i18n'
-import { Wrench } from '@/lib/icons'
+import { ExternalLink, Loader2, Wrench, Zap } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { notify, notifyError } from '@/store/notifications'
 import { $activeSessionId } from '@/store/session'
-import type { HermesConfigRecord } from '@/types/hermes'
+import type { ActionStatusResponse, HermesConfigRecord, McpCatalogEntry } from '@/types/hermes'
 
 import { EmptyState, LoadingState, Pill, SettingsContent } from './primitives'
 import { useDeepLinkHighlight } from './use-deep-link-highlight'
@@ -21,6 +28,9 @@ interface McpSettingsProps {
 }
 
 type McpServers = Record<string, Record<string, unknown>>
+
+const N8N_DOCS_URL = 'https://hermes-agent.ai/integrations/n8n'
+const N8N_DEFAULT_URL = 'http://127.0.0.1:5678'
 
 const EMPTY_SERVER = {
   command: '',
@@ -42,6 +52,215 @@ const transportLabel = (server: Record<string, unknown>) =>
       : typeof server.command === 'string'
         ? 'stdio'
         : 'custom'
+
+function N8nSetupCard({
+  installed,
+  onInstalled
+}: {
+  installed: boolean
+  onInstalled: () => void
+}) {
+  const [entry, setEntry] = useState<McpCatalogEntry | null>(null)
+  const [baseUrl, setBaseUrl] = useState(N8N_DEFAULT_URL)
+  const [apiKey, setApiKey] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [installing, setInstalling] = useState(false)
+  const [status, setStatus] = useState<ActionStatusResponse | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    getMcpCatalog()
+      .then(catalog => {
+        if (cancelled) {
+          return
+        }
+        setEntry(catalog.entries.find(item => item.name === 'n8n') ?? null)
+      })
+      .catch(err => notifyError(err, 'Could not load the MCP catalog.'))
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+
+    return () => void (cancelled = true)
+  }, [])
+
+  useEffect(() => {
+    if (!installing) {
+      return
+    }
+
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const next = await getActionStatus('mcp-install', 80)
+        if (cancelled) {
+          return
+        }
+        setStatus(next)
+        if (!next.running) {
+          setInstalling(false)
+          if (next.exit_code === 0) {
+            notify({
+              kind: 'success',
+              title: 'n8n automation connected',
+              message: 'Reload MCP or start a new chat session to use the n8n tools.'
+            })
+            onInstalled()
+          } else if (next.exit_code !== null) {
+            notify({
+              kind: 'error',
+              title: 'n8n setup failed',
+              message: 'Open the installer output for details.'
+            })
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          notifyError(err, 'Could not read the n8n install status.')
+        }
+      }
+    }
+
+    void poll()
+    const id = window.setInterval(() => void poll(), 2000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [installing, onInstalled])
+
+  const install = async () => {
+    const url = baseUrl.trim()
+    const key = apiKey.trim()
+
+    if (!url) {
+      notify({ kind: 'error', title: 'n8n URL required', message: 'Enter your n8n instance URL.' })
+      return
+    }
+    if (!key) {
+      notify({ kind: 'error', title: 'n8n API key required', message: 'Generate an API key in n8n Settings -> API.' })
+      return
+    }
+
+    setInstalling(true)
+    setStatus(null)
+
+    try {
+      const result = await installMcpCatalogEntry({
+        name: 'n8n',
+        enable: true,
+        env: {
+          N8N_BASE_URL: url,
+          N8N_API_KEY: key
+        }
+      })
+
+      if (!result.background) {
+        setInstalling(false)
+        notify({
+          kind: 'success',
+          title: 'n8n automation connected',
+          message: 'Reload MCP or start a new chat session to use the n8n tools.'
+        })
+        onInstalled()
+      }
+    } catch (err) {
+      setInstalling(false)
+      notifyError(err, 'Could not install the n8n MCP integration.')
+    }
+  }
+
+  const recentLines = status?.lines.slice(-8) ?? []
+
+  return (
+    <div className="mb-6 rounded-lg border bg-(--ui-bg-secondary) p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Zap className="size-4 text-primary" />
+            n8n Automation
+            {installed && <Pill>installed</Pill>}
+          </div>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Connect LexEdge/Hermes to an existing n8n instance. n8n runs separately; this only installs the Hermes MCP bridge and stores your n8n URL/API key locally.
+          </p>
+        </div>
+        <Button
+          onClick={() => window.hermesDesktop?.openExternal?.(N8N_DOCS_URL)}
+          size="xs"
+          type="button"
+          variant="text"
+        >
+          <ExternalLink className="size-3.5" />
+          Guide
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Checking n8n catalog entry...
+        </div>
+      ) : !entry ? (
+        <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          n8n is not available in this Hermes MCP catalog.
+        </div>
+      ) : (
+        <>
+          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <label className="grid gap-1.5">
+              <span className="text-xs text-muted-foreground">n8n URL</span>
+              <Input
+                disabled={installing}
+                onChange={event => setBaseUrl(event.currentTarget.value)}
+                placeholder={N8N_DEFAULT_URL}
+                value={baseUrl}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs text-muted-foreground">n8n API key</span>
+              <Input
+                autoComplete="off"
+                disabled={installing}
+                onChange={event => setApiKey(event.currentTarget.value)}
+                placeholder="Generate in n8n Settings -> API"
+                type="password"
+                value={apiKey}
+              />
+            </label>
+            <div className="flex items-end">
+              <Button disabled={installing} onClick={() => void install()} size="sm" type="button">
+                {installing ? <Loader2 className="size-4 animate-spin" /> : null}
+                {installed ? 'Update n8n' : 'Connect n8n'}
+              </Button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Default tools are read-mostly: health, workflow lookup, executions, recent failures, and workflow export.
+          </p>
+          {recentLines.length > 0 && (
+            <div className="mt-4 rounded-md border bg-background/70 p-3">
+              <div className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                Install output
+              </div>
+              <div className="space-y-1 font-mono text-[11px] leading-5 text-muted-foreground">
+                {recentLines.map((line, index) => (
+                  <div className="truncate" key={`${index}-${line}`}>
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
 export function McpSettings({ gateway, onConfigSaved }: McpSettingsProps) {
   const { t } = useI18n()
@@ -74,6 +293,7 @@ export function McpSettings({ gateway, onConfigSaved }: McpSettingsProps) {
 
   const servers = useMemo(() => getServers(config), [config])
   const names = useMemo(() => Object.keys(servers).sort(), [servers])
+  const n8nInstalled = Boolean(servers.n8n)
 
   useDeepLinkHighlight({
     block: 'nearest',
@@ -186,6 +406,19 @@ export function McpSettings({ gateway, onConfigSaved }: McpSettingsProps) {
 
   return (
     <SettingsContent>
+      <N8nSetupCard
+        installed={n8nInstalled}
+        onInstalled={() => {
+          void getHermesConfigRecord()
+            .then(next => {
+              setConfig(next)
+              setSelected('n8n')
+              onConfigSaved?.()
+            })
+            .catch(err => notifyError(err, m.failedLoad))
+        }}
+      />
+
       <div className="mb-4 flex items-center justify-end gap-4">
         <Button onClick={() => setSelected(null)} size="xs" variant="text">
           {m.newServer}
