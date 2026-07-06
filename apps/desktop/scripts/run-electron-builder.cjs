@@ -37,7 +37,18 @@ function electronBuilderCli() {
 
 const dist = electronDistDir()
 const args = []
-if (dist && fs.existsSync(distBinary(dist))) {
+const requestedTargets = process.argv.slice(2)
+const crossPlatformBuild =
+  (requestedTargets.includes("--win") && process.platform !== "win32") ||
+  (requestedTargets.includes("--mac") && process.platform !== "darwin") ||
+  (requestedTargets.includes("--linux") && process.platform !== "linux")
+
+if (crossPlatformBuild) {
+  console.warn(
+    "[run-electron-builder] cross-platform target requested; not using local " +
+      "host Electron dist so electron-builder can fetch the target runtime."
+  )
+} else if (dist && fs.existsSync(distBinary(dist))) {
   args.push(`-c.electronDist=${dist}`)
 } else {
   console.warn(
@@ -45,7 +56,7 @@ if (dist && fs.existsSync(distBinary(dist))) {
       "via @electron/get (electronVersion + ELECTRON_MIRROR)."
   )
 }
-args.push(...process.argv.slice(2))
+args.push(...requestedTargets)
 
 const result = spawnSync(process.execPath, [electronBuilderCli(), ...args], {
   stdio: "inherit",

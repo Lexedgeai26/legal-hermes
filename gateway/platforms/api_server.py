@@ -19,6 +19,9 @@ Exposes an HTTP server with endpoints:
 - GET  /v1/runs/{run_id}/events    — SSE stream of structured lifecycle events
 - POST /v1/runs/{run_id}/approval — resolve a pending run approval
 - POST /v1/runs/{run_id}/stop       — interrupt a running agent
+- GET  /api/workflows               — list predefined legal workflows
+- POST /api/workflows/execute       — execute a predefined workflow
+- GET  /api/workflows/runs/{run_id} — poll workflow execution status
 - GET  /health                     — health check
 - GET  /health/detailed            — rich status for cross-container dashboard probing
 
@@ -92,6 +95,59 @@ MAX_REQUEST_BYTES = 10_000_000  # 10 MB — accommodates long agent conversation
 CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 30.0
 MAX_NORMALIZED_TEXT_LENGTH = 65_536  # 64 KB cap for normalized content parts
 MAX_CONTENT_LIST_SIZE = 1_000  # Max items when content is an array
+
+_DEFAULT_LEGAL_WORKFLOWS = [
+    {
+        "id": "contract.nda_intake",
+        "title": "NDA Intake and Redline Checklist",
+        "group": "contracts",
+        "runner": "internal",
+        "description": "Collect intake metadata and produce a structured NDA review checklist.",
+        "required_inputs": [
+            {"name": "client_name", "type": "text", "required": True},
+            {"name": "counterparty_name", "type": "text", "required": True},
+            {"name": "jurisdiction", "type": "text", "required": True},
+            {"name": "risk_tolerance", "type": "text", "required": False},
+        ],
+        "agent_prompt_template": (
+            "You are a legal workflow runner. Produce a concise checklist and draft plan.\n"
+            "Workflow: NDA intake and redline checklist.\n"
+            "Inputs: {inputs}\n"
+            "Return: brief risk map, required follow-up questions, and recommended next actions."
+        ),
+    },
+    {
+        "id": "compliance.contract_expiry_tracker",
+        "title": "Contract Renewal Reminder",
+        "group": "contracts",
+        "runner": "n8n",
+        "description": "Track upcoming contract expiries and generate reminder tasks.",
+        "n8n_webhook_env": "N8N_WEBHOOK_CONTRACT_RENEWAL",
+        "required_inputs": [
+            {"name": "contract_name", "type": "text", "required": True},
+            {"name": "expiry_date", "type": "date", "required": True},
+            {"name": "counterparty", "type": "text", "required": True},
+        ],
+    },
+    {
+        "id": "litigation.hearing_prep_pack",
+        "title": "Hearing Preparation Pack",
+        "group": "litigation",
+        "runner": "internal",
+        "description": "Generate a hearing prep bundle with issue list, chronology, and filing checklist.",
+        "required_inputs": [
+            {"name": "matter_name", "type": "text", "required": True},
+            {"name": "court", "type": "text", "required": True},
+            {"name": "hearing_date", "type": "date", "required": True},
+        ],
+        "agent_prompt_template": (
+            "You are a legal workflow runner. Build a hearing prep packet.\n"
+            "Workflow: Hearing preparation pack.\n"
+            "Inputs: {inputs}\n"
+            "Return: milestone checklist, risk flags, and 10-step attorney briefing."
+        ),
+    },
+]
 
 
 def _coerce_port(value: Any, default: int = DEFAULT_PORT) -> int:
@@ -781,6 +837,17 @@ class APIServerAdapter(BasePlatformAdapter):
         # resolves requests by session key, while API clients address the
         # in-flight run by run_id.
         self._run_approval_sessions: Dict[str, str] = {}
+        # Predefined legal workflow catalog (non-tech lawyer-facing surface).
+        self._workflow_catalog: List[Dict[str, Any]] = list(_DEFAULT_LEGAL_WORKFLOWS)
+        # Pollable workflow run status/history for catalog-driven orchestration.
+        self._workflow_runs: Dict[str, Dict[str, Any]] = {}
+        # n8n integration defaults (server-side only; keep secrets out of payloads).
+        self._n8n_api_key: str = os.getenv("N8N_API_KEY", "")
+        raw_workflow_timeout = os.getenv("N8N_WORKFLOW_TIMEOUT_SECONDS", "25")
+        try:
+            self._n8n_workflow_timeout_seconds = max(1.0, float(raw_workflow_timeout))
+        except (TypeError, ValueError):
+            self._n8n_workflow_timeout_seconds = 25.0
         self._session_db: Optional[Any] = None  # Lazy-init SessionDB for session continuity
 
     @staticmethod
@@ -1193,6 +1260,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_continuity_header": "X-Hermes-Session-Id",
                 "session_key_header": "X-Hermes-Session-Key",
                 "cors": bool(self._cors_origins),
+                "workflow_api": True,
             },
             "endpoints": {
                 "health": {"method": "GET", "path": "/health"},
@@ -1216,6 +1284,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_fork": {"method": "POST", "path": "/api/sessions/{session_id}/fork"},
                 "session_chat": {"method": "POST", "path": "/api/sessions/{session_id}/chat"},
                 "session_chat_stream": {"method": "POST", "path": "/api/sessions/{session_id}/chat/stream"},
+                "workflows": {"method": "GET", "path": "/api/workflows"},
+                "workflow_custom_execute": {"method": "POST", "path": "/api/workflows/custom/execute"},
+                "workflow_execute": {"method": "POST", "path": "/api/workflows/execute"},
+                "workflow_status": {"method": "GET", "path": "/api/workflows/runs/{run_id}"},
             },
         })
 
@@ -4196,6 +4268,436 @@ class APIServerAdapter(BasePlatformAdapter):
 
         return web.json_response({"run_id": run_id, "status": "stopping"})
 
+    # ------------------------------------------------------------------
+    # Legal workflow catalog + execution API
+    # ------------------------------------------------------------------
+
+    def _get_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+        for workflow in self._workflow_catalog:
+            if workflow.get("id") == workflow_id:
+                return workflow
+        return None
+
+    def _set_workflow_status(self, run_id: str, status: str, **fields: Any) -> Dict[str, Any]:
+        """Update workflow run status in memory."""
+        now = time.time()
+        current = self._workflow_runs.get(run_id, {})
+        current.update({
+            "object": "hermes.workflow.run",
+            "run_id": run_id,
+            "status": status,
+            "updated_at": now,
+        })
+        current.setdefault("created_at", fields.pop("created_at", now))
+        current.update(fields)
+        self._workflow_runs[run_id] = current
+        return current
+
+    def _resolve_n8n_webhook_url(self, workflow: Dict[str, Any]) -> str:
+        env_name = workflow.get("n8n_webhook_env") or workflow.get("n8n_webhook")
+        if isinstance(env_name, str) and env_name.strip():
+            if env_name.startswith("http://") or env_name.startswith("https://"):
+                return env_name
+            resolved = os.getenv(env_name, "").strip()
+            if resolved:
+                return resolved
+        return ""
+
+    def _resolve_n8n_api_key(self) -> str:
+        runtime_key = os.getenv("N8N_API_KEY", "").strip()
+        if runtime_key:
+            return runtime_key
+        return self._n8n_api_key
+
+    async def _execute_n8n_webhook(
+        self,
+        run_id: str,
+        workflow_id: str,
+        workflow_title: str,
+        webhook: str,
+        inputs: Dict[str, Any],
+        gateway_session_key: Optional[str] = None,
+        matter_id: Optional[str] = None,
+    ) -> None:
+        try:
+            payload = {
+                "workflow_id": workflow_id,
+                "run_id": run_id,
+                "matter_id": matter_id,
+                "session_key": gateway_session_key,
+                "inputs": inputs,
+            }
+
+            import aiohttp  # already required by server operation
+
+            headers = {"Content-Type": "application/json"}
+            api_key = self._resolve_n8n_api_key()
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            self._set_workflow_status(
+                run_id,
+                "running",
+                workflow_id=workflow_id,
+                workflow_title=workflow_title,
+                runner="n8n",
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    webhook,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._n8n_workflow_timeout_seconds,
+                ) as resp:
+                    response_text = await resp.text()
+                    response_json = None
+                    try:
+                        content_type = resp.headers.get("Content-Type", "")
+                        if "application/json" in content_type.lower():
+                            response_json = await resp.json(content_type=None)
+                    except Exception:
+                        response_json = None
+                    status_code = resp.status
+
+            if 200 <= status_code < 300:
+                self._set_workflow_status(
+                    run_id,
+                    "completed",
+                    output=response_json or response_text,
+                    last_event="completed",
+                )
+            else:
+                self._set_workflow_status(
+                    run_id,
+                    "failed",
+                    error=f"n8n returned HTTP {status_code}",
+                    output=response_json or response_text,
+                    last_event="failed",
+                )
+        except Exception as exc:
+            logger.exception("[api_server] workflow %s n8n execution failed", run_id)
+            self._set_workflow_status(
+                run_id,
+                "failed",
+                error=str(exc),
+                last_event="failed",
+            )
+
+    def _build_internal_workflow_prompt(self, workflow: Dict[str, Any], inputs: Dict[str, Any]) -> str:
+        template = workflow.get("agent_prompt_template") or (
+            "You are a legal workflow runner.\n"
+            "Workflow: {title}\nInputs: {inputs}\n"
+            "Return a concise checklist and execution plan."
+        )
+        return template.format(
+            title=workflow.get("title", "legal workflow"),
+            inputs=json.dumps(inputs, ensure_ascii=False, sort_keys=True),
+        )
+
+    async def _execute_internal_workflow(
+        self,
+        run_id: str,
+        workflow: Dict[str, Any],
+        inputs: Dict[str, Any],
+        gateway_session_key: Optional[str] = None,
+        matter_id: Optional[str] = None,
+    ) -> None:
+        self._set_workflow_status(
+            run_id,
+            "running",
+            workflow_id=workflow.get("id"),
+            workflow_title=workflow.get("title"),
+            runner="internal",
+        )
+        session_id = matter_id or run_id
+        prompt = self._build_internal_workflow_prompt(workflow, inputs)
+        try:
+            result, usage = await self._run_agent(
+                user_message=prompt,
+                conversation_history=[],
+                session_id=session_id,
+                gateway_session_key=gateway_session_key,
+            )
+            if isinstance(result, dict) and result.get("failed"):
+                self._set_workflow_status(
+                    run_id,
+                    "failed",
+                    error=result.get("error") or "workflow execution failed",
+                )
+                return
+
+            self._set_workflow_status(
+                run_id,
+                "completed",
+                output=result.get("final_response", "") if isinstance(result, dict) else str(result),
+                usage=usage,
+                last_event="completed",
+            )
+        except Exception as exc:
+            logger.exception("[api_server] workflow %s internal execution failed", run_id)
+            self._set_workflow_status(
+                run_id,
+                "failed",
+                error=str(exc),
+                last_event="failed",
+            )
+
+    async def _execute_n8n_workflow(
+        self,
+        run_id: str,
+        workflow: Dict[str, Any],
+        inputs: Dict[str, Any],
+        gateway_session_key: Optional[str] = None,
+        matter_id: Optional[str] = None,
+    ) -> None:
+        try:
+            webhook = self._resolve_n8n_webhook_url(workflow)
+            if not webhook:
+                self._set_workflow_status(
+                    run_id,
+                    "failed",
+                    workflow_id=workflow.get("id"),
+                    workflow_title=workflow.get("title"),
+                    runner="n8n",
+                    error="No n8n webhook configured for this workflow",
+                )
+                return
+
+            await self._execute_n8n_webhook(
+                run_id,
+                workflow.get("id") or run_id,
+                workflow.get("title") or "legal workflow",
+                webhook,
+                inputs,
+                gateway_session_key=gateway_session_key,
+                matter_id=matter_id,
+            )
+        except Exception as exc:
+            logger.exception("[api_server] workflow %s n8n execution failed", run_id)
+            self._set_workflow_status(
+                run_id,
+                "failed",
+                error=str(exc),
+                last_event="failed",
+            )
+
+    async def _handle_execute_custom_workflow(self, request: "web.Request") -> "web.Response":
+        """POST /api/workflows/custom/execute — execute an ad-hoc workflow webhook."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        gateway_session_key, key_err = self._parse_session_key_header(request)
+        if key_err is not None:
+            return key_err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response(_openai_error("Invalid JSON"), status=400)
+
+        workflow_id = str(body.get("workflow_id", "custom.workflow")).strip() or "custom.workflow"
+        workflow_title = str(body.get("workflow_title", workflow_id)).strip() or workflow_id
+        webhook = str(body.get("webhook_url", "")).strip()
+        if not webhook:
+            return web.json_response(_openai_error("Missing 'webhook_url'"), status=400)
+        raw_inputs = body.get("inputs")
+        if raw_inputs is None:
+            raw_inputs = {}
+        if not isinstance(raw_inputs, dict):
+            return web.json_response(_openai_error("'inputs' must be an object"), status=400)
+        inputs = dict(raw_inputs)
+
+        matter_id = body.get("matter_id")
+        if matter_id is not None and not isinstance(matter_id, str):
+            matter_id = str(matter_id)
+        if isinstance(matter_id, str):
+            matter_id = matter_id.strip() or None
+
+        run_id = f"wf_run_{uuid.uuid4().hex}"
+        self._set_workflow_status(
+            run_id,
+            "queued",
+            workflow_id=workflow_id,
+            workflow_title=workflow_title,
+            runner="n8n",
+            matter_id=matter_id,
+            inputs=inputs,
+            requested_by=gateway_session_key,
+            group="custom",
+        )
+
+        task = asyncio.create_task(
+            self._execute_n8n_webhook(
+                run_id,
+                workflow_id,
+                workflow_title,
+                webhook,
+                inputs,
+                gateway_session_key=gateway_session_key,
+                matter_id=matter_id,
+            )
+        )
+        try:
+            self._background_tasks.add(task)
+        except TypeError:
+            pass
+        if hasattr(task, "add_done_callback"):
+            task.add_done_callback(self._background_tasks.discard)
+
+        return web.json_response({"run_id": run_id, "status": "queued", "workflow_id": workflow_id}, status=202)
+
+    async def _handle_list_workflows(self, request: "web.Request") -> "web.Response":
+        """GET /api/workflows — list predefined legal workflows."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        group_filter = request.query.get("group")
+        runner_filter = request.query.get("runner")
+        items = []
+        for workflow in self._workflow_catalog:
+            if group_filter and workflow.get("group") != group_filter:
+                continue
+            if runner_filter and workflow.get("runner") != runner_filter:
+                continue
+            item = dict(workflow)
+            item.pop("agent_prompt_template", None)
+            env_name = item.pop("n8n_webhook_env", None)
+            if item.get("runner") == "n8n":
+                item["n8n_webhook"] = bool(self._resolve_n8n_webhook_url(workflow))
+                item["n8n_api_key_set"] = bool(self._resolve_n8n_api_key())
+                api_url = os.getenv("N8N_API_URL", "").strip()
+                if api_url:
+                    item["n8n_api_url"] = api_url
+                if env_name:
+                    item["configured_via"] = env_name
+            else:
+                item["n8n_webhook"] = False
+            items.append(item)
+
+        return web.json_response({"workflows": items})
+
+    async def _handle_get_workflow_run(self, request: "web.Request") -> "web.Response":
+        """GET /api/workflows/runs/{run_id} — poll workflow execution state."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        run_id = request.match_info["run_id"]
+        status = self._workflow_runs.get(run_id)
+        if status is None:
+            return web.json_response(
+                _openai_error(f"Workflow run not found: {run_id}", code="workflow_run_not_found"),
+                status=404,
+            )
+        return web.json_response(status)
+
+    async def _handle_execute_workflow(self, request: "web.Request") -> "web.Response":
+        """POST /api/workflows/execute — execute a predefined workflow by id."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        gateway_session_key, key_err = self._parse_session_key_header(request)
+        if key_err is not None:
+            return key_err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response(_openai_error("Invalid JSON"), status=400)
+
+        workflow_id = str(body.get("workflow_id", "")).strip()
+        if not workflow_id:
+            return web.json_response(_openai_error("Missing 'workflow_id'"), status=400)
+
+        workflow = self._get_workflow(workflow_id)
+        if workflow is None:
+            return web.json_response(
+                _openai_error(f"Workflow not found: {workflow_id}", code="workflow_not_found"),
+                status=404,
+            )
+
+        raw_inputs = body.get("inputs")
+        if raw_inputs is None:
+            raw_inputs = {}
+        if not isinstance(raw_inputs, dict):
+            return web.json_response(_openai_error("'inputs' must be an object"), status=400)
+        inputs = dict(raw_inputs)
+
+        missing = [
+            entry.get("name")
+            for entry in workflow.get("required_inputs", [])
+            if entry.get("required") and not str(inputs.get(entry.get("name"), "")).strip()
+        ]
+        if missing:
+            return web.json_response(
+                _openai_error(
+                    f"Missing required workflow inputs: {', '.join(missing)}",
+                    code="missing_workflow_inputs",
+                ),
+                status=400,
+            )
+
+        run_id = f"wf_run_{uuid.uuid4().hex}"
+        matter_id = body.get("matter_id")
+        if matter_id is not None and not isinstance(matter_id, str):
+            matter_id = str(matter_id)
+        if isinstance(matter_id, str):
+            matter_id = matter_id.strip() or None
+
+        self._set_workflow_status(
+            run_id,
+            "queued",
+            workflow_id=workflow.get("id"),
+            workflow_title=workflow.get("title"),
+            runner=workflow.get("runner"),
+            matter_id=matter_id,
+            inputs=inputs,
+            requested_by=gateway_session_key,
+            group=workflow.get("group"),
+        )
+
+        if workflow.get("runner") == "internal":
+            task = asyncio.create_task(
+                self._execute_internal_workflow(
+                    run_id,
+                    workflow,
+                    inputs,
+                    gateway_session_key=gateway_session_key,
+                    matter_id=matter_id,
+                )
+            )
+        elif workflow.get("runner") == "n8n":
+            task = asyncio.create_task(
+                self._execute_n8n_workflow(
+                    run_id,
+                    workflow,
+                    inputs,
+                    gateway_session_key=gateway_session_key,
+                    matter_id=matter_id,
+                )
+            )
+        else:
+            self._set_workflow_status(
+                run_id,
+                "failed",
+                workflow_id=workflow.get("id"),
+                error=f"Unsupported workflow runner: {workflow.get('runner')}",
+            )
+            return web.json_response({"run_id": run_id, "status": "failed", "workflow_id": workflow_id}, status=500)
+
+        try:
+            self._background_tasks.add(task)
+        except TypeError:
+            pass
+        if hasattr(task, "add_done_callback"):
+            task.add_done_callback(self._background_tasks.discard)
+
+        return web.json_response({"run_id": run_id, "status": "queued"}, status=202)
+
     async def _sweep_orphaned_runs(self) -> None:
         """Periodically clean up run streams that were never consumed."""
         while True:
@@ -4230,6 +4732,15 @@ class APIServerAdapter(BasePlatformAdapter):
             ]
             for run_id in stale_statuses:
                 self._run_statuses.pop(run_id, None)
+
+            stale_workflow_runs = [
+                run_id
+                for run_id, status in list(self._workflow_runs.items())
+                if status.get("status") in {"completed", "failed", "cancelled"}
+                and now - float(status.get("updated_at", 0) or 0) > self._RUN_STATUS_TTL
+            ]
+            for run_id in stale_workflow_runs:
+                self._workflow_runs.pop(run_id, None)
 
     # ------------------------------------------------------------------
     # BasePlatformAdapter interface
@@ -4286,6 +4797,11 @@ class APIServerAdapter(BasePlatformAdapter):
             self._app.router.add_get("/v1/runs/{run_id}/events", self._handle_run_events)
             self._app.router.add_post("/v1/runs/{run_id}/approval", self._handle_run_approval)
             self._app.router.add_post("/v1/runs/{run_id}/stop", self._handle_stop_run)
+            # Workflow catalog and execution surface (predefined legal workflows)
+            self._app.router.add_get("/api/workflows", self._handle_list_workflows)
+            self._app.router.add_post("/api/workflows/execute", self._handle_execute_workflow)
+            self._app.router.add_post("/api/workflows/custom/execute", self._handle_execute_custom_workflow)
+            self._app.router.add_get("/api/workflows/runs/{run_id}", self._handle_get_workflow_run)
             # Store the adapter after native routes are registered. Local Hermes-Relay
             # bootstrap shims use this key as a feature-detection hook; registering
             # native routes first lets those shims no-op instead of shadowing the

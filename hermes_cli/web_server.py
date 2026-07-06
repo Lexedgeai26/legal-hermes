@@ -5832,6 +5832,7 @@ async def update_legal_assistant_settings(body: LegalAssistantSettingsUpdate, pr
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+
 @app.get("/api/matters")
 async def list_matters(profile: Optional[str] = None):
     try:
@@ -10378,8 +10379,8 @@ async def get_lexedge_practice_catalog():
 
         return catalog_payload()
     except Exception as exc:
-        _log.exception("GET /api/lexedge/practice/catalog failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.exception("GET /api/lexedge/practice/catalog failed; returning fallback catalog payload")
+        return {"options": {}, "groups": {}, "jurisdictions": []}
 
 
 @app.post("/api/lexedge/practice/profile")
@@ -10641,10 +10642,20 @@ async def get_practice_role_soul_template(role: str):
             "practice_role_label": resolved.label,
         }
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        from hermes_cli.legal_practice_profiles import build_practice_role_soul as _build_fallback
+
+        return {
+            "content": _build_fallback("litigation-lawyer"),
+            "practice_role": role,
+            "practice_role_label": "Litigation Lawyer",
+        }
     except Exception as exc:
         _log.exception("GET /api/profiles/practice-roles/%s/soul-template failed", role)
-        raise HTTPException(status_code=500, detail=str(exc))
+        return {
+            "content": "",
+            "practice_role": role,
+            "practice_role_label": role,
+        }
 
 
 @app.post("/api/profiles")

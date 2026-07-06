@@ -202,6 +202,7 @@ export interface LegalAssistantSettingsResponse {
   settings: LegalAssistantSettings
 }
 
+
 export interface MatterFile {
   extension: string
   modified_at: number

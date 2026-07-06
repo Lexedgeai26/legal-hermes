@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { getLegalAssistantSettings, updateLegalAssistantSettings } from '@/hermes'
+import {
+  getLegalAssistantSettings,
+  updateLegalAssistantSettings
+} from '@/hermes'
 import { Bell, CheckCircle2, FileText, Lock, MessageCircle, Settings2, Users } from '@/lib/icons'
 import { notify, notifyError } from '@/store/notifications'
-import type { LegalAssistantSettings } from '@/types/hermes'
+import type {
+  LegalAssistantSettings,
+} from '@/types/hermes'
 
 import { asText, getNested, setNested } from './helpers'
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
@@ -66,29 +71,40 @@ function boolAt(settings: LegalAssistantSettings, path: string): boolean {
   return Boolean(getNested(settings, path))
 }
 
+
 export function LegalAssistantSettingsView() {
   const [settings, setSettings] = useState<LegalAssistantSettings | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    getLegalAssistantSettings()
-      .then(result => {
+
+    async function load() {
+      try {
+        const settingsResult = await getLegalAssistantSettings()
         if (!cancelled) {
-          setSettings(result.settings)
+          setSettings(settingsResult.settings)
         }
-      })
-      .catch(err => notifyError(err, 'Could not load legal assistant settings.'))
+      } catch (err) {
+        if (!cancelled) {
+          notifyError(err, 'Could not load legal assistant settings.')
+        }
+      } finally {
+      }
+    }
+
+    void load()
+
     return () => {
       cancelled = true
     }
   }, [])
 
   const dirty = useMemo(() => Boolean(settings), [settings])
-
   function update(path: string, value: unknown) {
     setSettings(current => (current ? setNested(current, path, value) : current))
   }
+
 
   async function save() {
     if (!settings) {
@@ -96,6 +112,7 @@ export function LegalAssistantSettingsView() {
     }
     setSaving(true)
     try {
+
       const result = await updateLegalAssistantSettings(settings)
       setSettings(result.settings)
       notify({ kind: 'success', title: 'Legal assistant settings saved', message: 'Your workspace preferences were updated.' })
@@ -120,30 +137,41 @@ export function LegalAssistantSettingsView() {
         <header>
           <h2 className="text-lg font-semibold tracking-tight">Legal Assistant</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Configure LexEdge for Indian legal work without editing files or technical gateway settings. These
-            preferences are saved for the active workspace.
+            Configure LexEdge for legal workflows without editing files or technical gateway settings. These preferences are saved
+            for the active workspace.
           </p>
         </header>
 
         <section>
           <SectionHeading icon={Users} title="Identity" />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'identity.assistant_name'))} onChange={e => update('identity.assistant_name', e.target.value)} />}
+            action={
+              <Input
+                value={asText(getNested(settings, 'identity.assistant_name'))}
+                onChange={e => update('identity.assistant_name', e.target.value)}
+              />
+            }
             description="Name shown in lawyer-facing messages."
             title="Assistant name"
           />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'identity.firm_name'))} onChange={e => update('identity.firm_name', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'identity.firm_name'))} onChange={e => update('identity.firm_name', e.target.value)} />
+            }
             description="Firm or chamber name used in defaults."
             title="Firm name"
           />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'identity.default_jurisdiction'))} onChange={e => update('identity.default_jurisdiction', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'identity.default_jurisdiction'))} onChange={e => update('identity.default_jurisdiction', e.target.value)} />
+            }
             description="Default jurisdiction for legal drafting and review."
             title="Default jurisdiction"
           />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'identity.default_court'))} onChange={e => update('identity.default_court', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'identity.default_court'))} onChange={e => update('identity.default_court', e.target.value)} />
+            }
             description="Optional default court, tribunal, or forum."
             title="Default court/forum"
           />
@@ -215,8 +243,7 @@ export function LegalAssistantSettingsView() {
         <section>
           <SectionHeading icon={MessageCircle} title="Channels" />
           <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm leading-6 text-muted-foreground">
-            Connect accounts from the Messaging page. These toggles control legal safety defaults for those connected
-            channels.
+            Connect accounts from the Messaging page. These toggles control legal safety defaults for those connected channels.
           </div>
           {CHANNEL_RULES.map(([path, title, description]) => (
             <ToggleRow
@@ -246,22 +273,30 @@ export function LegalAssistantSettingsView() {
         <section>
           <SectionHeading icon={Settings2} title="Matter defaults" />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'matter_defaults.matter_number_format'))} onChange={e => update('matter_defaults.matter_number_format', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'matter_defaults.matter_number_format'))} onChange={e => update('matter_defaults.matter_number_format', e.target.value)} />
+            }
             description="Example: LEX-{YYYY}-{####}"
             title="Matter numbering format"
           />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'matter_defaults.default_folder'))} onChange={e => update('matter_defaults.default_folder', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'matter_defaults.default_folder'))} onChange={e => update('matter_defaults.default_folder', e.target.value)} />
+            }
             description="Optional folder for matter documents."
             title="Default matter folder"
           />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'matter_defaults.reminder_schedule'))} onChange={e => update('matter_defaults.reminder_schedule', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'matter_defaults.reminder_schedule'))} onChange={e => update('matter_defaults.reminder_schedule', e.target.value)} />
+            }
             description="Default time for reminders, e.g. 09:00."
             title="Reminder schedule"
           />
           <ListRow
-            action={<Input value={asText(getNested(settings, 'matter_defaults.client_update_format'))} onChange={e => update('matter_defaults.client_update_format', e.target.value)} />}
+            action={
+              <Input value={asText(getNested(settings, 'matter_defaults.client_update_format'))} onChange={e => update('matter_defaults.client_update_format', e.target.value)} />
+            }
             description="concise, detailed, bilingual, or client-friendly."
             title="Client update format"
           />

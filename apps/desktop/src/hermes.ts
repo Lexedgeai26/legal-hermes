@@ -678,6 +678,7 @@ export function updateLegalAssistantSettings(
   })
 }
 
+
 export function listMatters(): Promise<MattersResponse> {
   return window.hermesDesktop.api<MattersResponse>({
     ...profileScoped(),

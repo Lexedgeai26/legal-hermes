@@ -1108,6 +1108,7 @@ export interface Translations {
     finishingTitle: string
     failedDesc: string
     activeDesc: string
+    networkHint: string
     progress: (completed: number, total: number) => string
     currentStage: (stage: string) => string
     fetchingManifest: string

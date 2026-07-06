@@ -436,7 +436,7 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
               </p>
               {!failed && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Built on Hermes Agent. Keep this window open while setup downloads and configures the local runtime.
+                  {copy.networkHint}
                 </p>
               )}
             </div>

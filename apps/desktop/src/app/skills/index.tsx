@@ -25,6 +25,8 @@ import type { SetStatusbarItemGroup } from '../shell/statusbar-controls'
 const SKILLS_MODES = ['skills', 'toolsets'] as const
 type SkillsMode = (typeof SKILLS_MODES)[number]
 
+const CLAUDE_FOR_LEGAL_SOURCE = 'https://github.com/anthropics/claude-for-legal'
+
 function categoryFor(skill: SkillInfo): string {
   return asText(skill.category) || 'general'
 }
@@ -83,6 +85,7 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [importPreset, setImportPreset] = useState<{ category?: string; source?: string }>({})
   const [savingSkill, setSavingSkill] = useState<string | null>(null)
   const [savingToolset, setSavingToolset] = useState<string | null>(null)
   const [expandedToolset, setExpandedToolset] = useState<string | null>(null)
@@ -246,13 +249,36 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
         <div className={cn('h-full overflow-y-auto py-3', PAGE_INSET_X)}>
           <div className="mb-3 flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
-              Have a Claude Code skill or plugin you like? You can bring it in here.
+              Browse, enable, and import skills. Claude for Legal imports are organized into the existing legal groups.
             </p>
-            <Button onClick={() => setImportOpen(true)} size="sm" type="button" variant="secondary">
-              <Codicon name="cloud-download" size="0.875rem" /> Import Claude skills
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                onClick={() => {
+                  setImportPreset({ source: CLAUDE_FOR_LEGAL_SOURCE })
+                  setImportOpen(true)
+                }}
+                size="sm"
+                type="button"
+                variant="default"
+              >
+                <Codicon name="symbol-misc" size="0.875rem" /> Import Claude for Legal
+              </Button>
+              <Button
+                onClick={() => {
+                  setImportPreset({})
+                  setImportOpen(true)
+                }}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Codicon name="cloud-download" size="0.875rem" /> Import Claude skills
+              </Button>
+            </div>
           </div>
           <ImportClaudeDialog
+            initialCategory={importPreset.category}
+            initialSource={importPreset.source}
             onImported={() => void refreshCapabilities()}
             onOpenChange={setImportOpen}
             open={importOpen}

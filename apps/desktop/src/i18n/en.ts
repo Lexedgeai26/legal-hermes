@@ -1476,9 +1476,11 @@ export const en: Translations = {
     settingUpTitle: 'Setting up LexEdge Legal Hermes Agent',
     finishingTitle: 'Finishing up',
     failedDesc:
-      'One of the local runtime setup steps failed. On Windows, this can happen if another Hermes CLI or desktop instance is running. Stop any running Hermes instances, then retry. Check the details below or the desktop log for the full transcript.',
+      'One of the local runtime setup steps failed. If the internet connection is slow, unstable, or blocked by a proxy, use Reload and retry. LexEdge keeps the transcript below so support can see the exact failed stage.',
     activeDesc:
-      'This is a one-time local setup. LexEdge is installing the Hermes Agent runtime and may download Python packages, Node modules, and legal workflow resources. This can take several minutes on a fresh machine; later launches skip this step.',
+      'This is a one-time local setup. LexEdge is installing the Hermes Agent runtime and may download Python, Git, Node.js, Python packages, Node modules, and browser helpers. On a fresh Windows machine or slow internet this can take several minutes; later launches skip this step.',
+    networkHint:
+      'Keep this window open. Downloads use automatic retries, and temporary pauses are normal on slow or corporate networks.',
     progress: (completed, total) => `${completed} of ${total} steps complete`,
     currentStage: stage => ` -- now: ${stage}`,
     fetchingManifest: 'Preparing the LexEdge installer...',

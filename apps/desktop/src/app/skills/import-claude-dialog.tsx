@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -17,10 +17,14 @@ import { importClaudeSkills } from '@/hermes'
 // tells the user what happened and what to do next in plain language, and the
 // dialog can always be cancelled.
 export function ImportClaudeDialog({
+  initialCategory = '',
+  initialSource = '',
   onImported,
   onOpenChange,
   open
 }: {
+  initialCategory?: string
+  initialSource?: string
   onImported: () => void
   onOpenChange: (open: boolean) => void
   open: boolean
@@ -30,6 +34,18 @@ export function ImportClaudeDialog({
   const [busy, setBusy] = useState<'import' | 'preview' | null>(null)
   const [report, setReport] = useState<ClaudeImportReport | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    setSource(initialSource)
+    setCategory(initialCategory)
+    setReport(null)
+    setProblem(null)
+    setBusy(null)
+  }, [initialCategory, initialSource, open])
 
   const reset = () => {
     setReport(null)
@@ -76,8 +92,8 @@ export function ImportClaudeDialog({
         <DialogHeader>
           <DialogTitle>Import Claude skills</DialogTitle>
           <DialogDescription>
-            Bring any Claude Code skill, command, or plugin into your assistant. Paste a git link or a folder path —
-            we&rsquo;ll convert it for you and check it for safety first.
+            Bring any Claude Code skill, command, plugin, or plugin suite into your assistant. Paste a git link or a
+            folder path — we&rsquo;ll convert it for you and check it for safety first.
           </DialogDescription>
         </DialogHeader>
 
@@ -103,14 +119,17 @@ export function ImportClaudeDialog({
                 setSource(e.target.value)
                 reset()
               }}
-              placeholder="https://github.com/someone/skill.git or /path/to/folder"
+              placeholder="https://github.com/anthropics/claude-for-legal or /path/to/folder"
               spellCheck={false}
               value={source}
             />
           </div>
           <div className="grid gap-1.5">
             <label className="text-xs font-medium" htmlFor="claude-import-category">
-              Category <span className="font-normal text-muted-foreground">(optional — we&rsquo;ll pick one if left blank)</span>
+              Category{' '}
+              <span className="font-normal text-muted-foreground">
+                (optional — leave blank for multi-plugin suites so each plugin keeps its own group)
+              </span>
             </label>
             <Input
               autoComplete="off"

@@ -202,6 +202,81 @@ function Invoke-NativeWithRelaxedErrorAction {
     }
 }
 
+function Invoke-DownloadFileWithRetry {
+    param(
+        [Parameter(Mandatory=$true)][string]$Uri,
+        [Parameter(Mandatory=$true)][string]$OutFile,
+        [int]$Attempts = 4,
+        [int]$TimeoutSec = 180
+    )
+
+    $lastError = $null
+    $uriHost = ""
+    try {
+        $uriHost = ([System.Uri]$Uri).Host
+    } catch {
+        $uriHost = $Uri
+    }
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try {
+            if (Test-Path -LiteralPath $OutFile) {
+                Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+            }
+            Write-Info "Downloading from $uriHost (attempt $i/$Attempts, timeout ${TimeoutSec}s)..."
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec $TimeoutSec
+            if ((Test-Path -LiteralPath $OutFile) -and ((Get-Item -LiteralPath $OutFile).Length -gt 0)) {
+                $sizeMb = [Math]::Round(((Get-Item -LiteralPath $OutFile).Length / 1MB), 1)
+                Write-Success "Downloaded $sizeMb MB from $uriHost"
+                return
+            }
+            throw "download produced an empty file"
+        } catch {
+            $lastError = $_
+            if ($i -ge $Attempts) { break }
+            $delay = [Math]::Min(30, 3 * $i)
+            Write-Warn "Download failed (attempt $i/$Attempts): $_"
+            Write-Info "Retrying in $delay seconds..."
+            Start-Sleep -Seconds $delay
+        }
+    }
+
+    throw "Download failed after $Attempts attempts: $lastError"
+}
+
+function Copy-DirectoryRobust {
+    param(
+        [Parameter(Mandatory=$true)][string]$Source,
+        [Parameter(Mandatory=$true)][string]$Destination
+    )
+
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    if (Get-Command robocopy -ErrorAction SilentlyContinue) {
+        Invoke-NativeWithRelaxedErrorAction {
+            robocopy $Source $Destination /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP
+        }
+        $code = $LASTEXITCODE
+        # robocopy uses 0-7 for success/warnings; 8+ is failure.
+        if ($code -le 7) { return }
+        throw "robocopy failed (exit $code)"
+    }
+
+    $lastError = $null
+    for ($i = 1; $i -le 3; $i++) {
+        try {
+            Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+            }
+            return
+        } catch {
+            $lastError = $_
+            if ($i -ge 3) { break }
+            Write-Warn "Repository file copy failed (attempt $i/3): $_"
+            Start-Sleep -Seconds (2 * $i)
+        }
+    }
+    throw "Repository file copy failed after retries: $lastError"
+}
+
 # Inspect npm output for a TLS-trust failure and, if found, print actionable
 # remediation. npm/Node surface corporate MITM proxies and missing root CAs as
 # "unable to get local issuer certificate" / "self-signed certificate in
@@ -674,7 +749,7 @@ function Install-Git {
         $gitDir = "$HermesHome\git"
 
         Write-Info "Downloading $assetName (Git for Windows $gitVerTag)..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing
+        Invoke-DownloadFileWithRetry -Uri $downloadUrl -OutFile $tmpFile -Attempts 5 -TimeoutSec 300
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
@@ -850,7 +925,7 @@ function Test-Node {
     try {
         $arch = Get-WindowsArch
         $indexUrl = "https://nodejs.org/dist/latest-v${NodeVersion}.x/"
-        $indexPage = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing
+        $indexPage = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing -TimeoutSec 180
         $zipName = ($indexPage.Content | Select-String -Pattern "node-v${NodeVersion}\.\d+\.\d+-win-${arch}\.zip" -AllMatches).Matches[0].Value
 
         if ($zipName) {
@@ -858,7 +933,7 @@ function Test-Node {
             $tmpZip = "$env:TEMP\$zipName"
             $tmpDir = "$env:TEMP\hermes-node-extract"
 
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpZip -UseBasicParsing
+            Invoke-DownloadFileWithRetry -Uri $downloadUrl -OutFile $tmpZip -Attempts 5 -TimeoutSec 300
             if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
             Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
 
@@ -1367,19 +1442,39 @@ function Install-Repository {
                 }
 
                 $sourceRoot = $repoMarker.DirectoryName
+                $sourceBatchRunner = Join-Path $sourceRoot "batch_runner.py"
+                if (-not (Test-Path -LiteralPath $sourceBatchRunner)) {
+                    throw "Source archive extraction was incomplete: missing $sourceBatchRunner"
+                }
                 New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) -ErrorAction SilentlyContinue | Out-Null
-                New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-                Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object {
-                    Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Recurse -Force
+                if (Test-Path $InstallDir) {
+                    Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
+                }
+                Copy-DirectoryRobust -Source $sourceRoot -Destination $InstallDir
+                $installedBatchRunner = Join-Path $InstallDir "batch_runner.py"
+                if (-not (Test-Path -LiteralPath $installedBatchRunner)) {
+                    $installedNames = (Get-ChildItem -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue |
+                        Select-Object -First 30 -ExpandProperty Name) -join ", "
+                    throw "Bundled source archive copy was incomplete: missing $installedBatchRunner. Installed entries: $installedNames"
                 }
                 Remove-Item -Recurse -Force $extractPath -ErrorAction SilentlyContinue
 
                 Push-Location $InstallDir
                 try {
-                    git -c windows.appendAtomically=false init 2>$null
-                    git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null
-                    git -c windows.appendAtomically=false config core.autocrlf false 2>$null
-                    git remote add origin $RepoUrlHttps 2>$null
+                    # Git for Windows prints the default-branch advisory to
+                    # stderr during plain `git init`. With the installer-wide
+                    # `$ErrorActionPreference = Stop`, PowerShell can treat
+                    # that harmless hint as a failed native command even when
+                    # git exits 0. Pin the initial branch and rely on
+                    # LASTEXITCODE for real failures.
+                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false -c init.defaultBranch=main init -b main 2>$null }
+                    if ($LASTEXITCODE -ne 0) { throw "git init failed (exit $LASTEXITCODE)" }
+                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null }
+                    if ($LASTEXITCODE -ne 0) { throw "git config windows.appendAtomically failed (exit $LASTEXITCODE)" }
+                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false config core.autocrlf false 2>$null }
+                    if ($LASTEXITCODE -ne 0) { throw "git config core.autocrlf failed (exit $LASTEXITCODE)" }
+                    Invoke-NativeWithRelaxedErrorAction { git remote add origin $RepoUrlHttps 2>$null }
+                    if ($LASTEXITCODE -ne 0) { throw "git remote add origin failed (exit $LASTEXITCODE)" }
                 } finally {
                     Pop-Location
                 }
@@ -1446,7 +1541,7 @@ function Install-Repository {
                 $zipPath = "$env:TEMP\hermes-agent-$zipLabel.zip"
                 $extractPath = "$env:TEMP\hermes-agent-extract"
 
-                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+                Invoke-DownloadFileWithRetry -Uri $zipUrl -OutFile $zipPath -Attempts 5 -TimeoutSec 300
                 if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
                 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 

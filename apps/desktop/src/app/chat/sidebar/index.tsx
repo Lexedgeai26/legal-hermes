@@ -95,7 +95,13 @@ import {
   sessionPinId
 } from '@/store/session'
 
-import { type AppView, ARTIFACTS_ROUTE, MATTERS_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE } from '../../routes'
+import {
+  type AppView,
+  ARTIFACTS_ROUTE,
+  MATTERS_ROUTE,
+  MESSAGING_ROUTE,
+  SKILLS_ROUTE
+} from '../../routes'
 import { SidebarPanelLabel } from '../../shell/sidebar-label'
 import type { SidebarNavItem } from '../../types'
 

@@ -306,36 +306,97 @@ def _discover(root: Path) -> Tuple[str, List[Path], List[Path], List[Path], dict
     return plugin, skill_dirs, command_mds, agent_mds, plugin_json
 
 
+def _convert_discovered_root(root: Path, *, category: Optional[str] = None) -> Tuple[List[ConvertedSkill], dict]:
+    plugin, skill_dirs, command_mds, agent_mds, _pjson = _discover(root)
+    cat = category or plugin
+    converted: List[ConvertedSkill] = []
+    for d in skill_dirs:
+        converted.append(_convert_skill_dir(d, plugin, cat, root))
+    for c in command_mds:
+        converted.append(_convert_command_md(c, plugin, cat, root))
+    for a in agent_mds:
+        converted.append(_convert_agent_md(a, plugin, root))
+
+    mcp_needed = sorted({m for c in converted for m in c.requires_mcp})
+    unknown = sorted({t for c in converted for t in c.unknown_tools})
+    report = {
+        "plugin": plugin,
+        "category": cat,
+        "counts": {"skills": len(skill_dirs), "commands": len(command_mds),
+                   "agents": len(agent_mds), "total": len(converted)},
+        "rewrites_total": _sum_rewrites(converted),
+        "mcp_servers_needed": mcp_needed,
+        "unmapped_tools": unknown,
+        "items": [{"name": c.name, "slug": c.slug, "kind": c.kind,
+                   "category": c.category, "support": c.support,
+                   "rewrites": c.rewrites, "requires_mcp": c.requires_mcp} for c in converted],
+        "warnings": _warnings(converted, mcp_needed, unknown),
+    }
+    return converted, report
+
+
+def _child_plugin_dirs(root: Path) -> List[Path]:
+    out: List[Path] = []
+    for child in sorted(p for p in root.iterdir() if p.is_dir()):
+        if child.name.startswith("."):
+            continue
+        if (child / ".claude-plugin" / "plugin.json").is_file():
+            out.append(child)
+            continue
+        if (child / "skills").is_dir() or (child / "commands").is_dir() or (child / "agents").is_dir():
+            out.append(child)
+    return out
+
+
 def convert_source(src: str, *, category: Optional[str] = None) -> Tuple[List[ConvertedSkill], dict]:
-    """Convert a Claude source into ConvertedSkill objects + a report (no writes)."""
+    """Convert a Claude source into ConvertedSkill objects + a report (no writes).
+
+    A source may be either one Claude plugin/skill or a repository containing
+    multiple plugin folders. For a repository-of-plugins, every child plugin
+    keeps its own category so existing Hermes/LexEdge skill groups continue to
+    work instead of collapsing all imported legal skills into one bucket.
+    """
     root, cleanup = _acquire(src)
     try:
-        plugin, skill_dirs, command_mds, agent_mds, pjson = _discover(root)
-        cat = category or plugin
-        converted: List[ConvertedSkill] = []
-        for d in skill_dirs:
-            converted.append(_convert_skill_dir(d, plugin, cat, root))
-        for c in command_mds:
-            converted.append(_convert_command_md(c, plugin, cat, root))
-        for a in agent_mds:
-            converted.append(_convert_agent_md(a, plugin, root))
+        converted, report = _convert_discovered_root(root, category=category)
+        if converted or category:
+            return converted, report
 
-        mcp_needed = sorted({m for c in converted for m in c.requires_mcp})
-        unknown = sorted({t for c in converted for t in c.unknown_tools})
-        report = {
-            "plugin": plugin,
-            "category": cat,
-            "counts": {"skills": len(skill_dirs), "commands": len(command_mds),
-                       "agents": len(agent_mds), "total": len(converted)},
-            "rewrites_total": _sum_rewrites(converted),
+        child_dirs = _child_plugin_dirs(root)
+        if not child_dirs:
+            return converted, report
+
+        all_converted: List[ConvertedSkill] = []
+        child_reports = []
+        counts = {"skills": 0, "commands": 0, "agents": 0, "total": 0}
+        rewrites: Dict[str, int] = {}
+        for child in child_dirs:
+            child_converted, child_report = _convert_discovered_root(child)
+            if not child_converted:
+                continue
+            all_converted.extend(child_converted)
+            child_reports.append(child_report)
+            for key in counts:
+                counts[key] += int(child_report.get("counts", {}).get(key, 0) or 0)
+            for key, value in child_report.get("rewrites_total", {}).items():
+                rewrites[key] = rewrites.get(key, 0) + int(value or 0)
+
+        mcp_needed = sorted({m for c in all_converted for m in c.requires_mcp})
+        unknown = sorted({t for c in all_converted for t in c.unknown_tools})
+        aggregate = {
+            "plugin": report.get("plugin") or root.name,
+            "category": "multiple",
+            "counts": counts,
+            "rewrites_total": rewrites,
             "mcp_servers_needed": mcp_needed,
             "unmapped_tools": unknown,
+            "child_plugins": [{"plugin": r.get("plugin"), "category": r.get("category"), "counts": r.get("counts")} for r in child_reports],
             "items": [{"name": c.name, "slug": c.slug, "kind": c.kind,
                        "category": c.category, "support": c.support,
-                       "rewrites": c.rewrites, "requires_mcp": c.requires_mcp} for c in converted],
-            "warnings": _warnings(converted, mcp_needed, unknown),
+                       "rewrites": c.rewrites, "requires_mcp": c.requires_mcp} for c in all_converted],
+            "warnings": _warnings(all_converted, mcp_needed, unknown),
         }
-        return converted, report
+        return all_converted, aggregate
     finally:
         if cleanup:
             shutil.rmtree(cleanup, ignore_errors=True)

@@ -1643,6 +1643,7 @@ export const zh: Translations = {
     failedDesc:
       '某个安装步骤失败。在 Windows 上，如果另一个 Hermes CLI 或桌面实例正在运行，可能会出现这种情况。请停止正在运行的 Hermes 实例后重试。可查看下面的详情或 desktop 日志中的完整记录。',
     activeDesc: '这是一次性设置。Hermes 安装器正在下载依赖并配置你的机器。之后启动会跳过此步骤。',
+    networkHint: '请保持此窗口打开。下载会自动重试，在慢速或企业网络上出现临时暂停是正常的。',
     progress: (completed, total) => `${completed}/${total} 个步骤已完成`,
     currentStage: stage => ` -- 当前：${stage}`,
     fetchingManifest: '正在获取安装器 manifest...',
