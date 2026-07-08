@@ -1,12 +1,12 @@
-# LexEdge AI
+# Hermes - Legal Agent by LexEdge AI
 
-LexEdge AI is an open-source, legal-focused personal AI assistant built on the MIT-licensed [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent).
+Hermes - Legal Agent by LexEdge AI is an open-source, legal-focused personal AI assistant built on the MIT-licensed [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent).
 
 This repository keeps the core Hermes agent architecture and adds LexEdge legal workflows, legal skill groups, desktop packaging improvements, and public-release documentation for lawyer-facing use cases.
 
 Customized by Chirag Kansara and LexEdge AI contributors. See [LexEdge AI](https://www.lexedge.ai/) for product context.
 
-> **Legal safety note:** LexEdge AI prepares drafts, checklists, summaries, and analysis for human review. It is not a lawyer, does not provide final legal advice, and should not file, serve, send, sign, or submit legal material without human approval.
+> **Legal safety note:** Hermes - Legal Agent by LexEdge AI prepares drafts, checklists, summaries, and analysis for human review. It is not a lawyer, does not provide final legal advice, and should not file, serve, send, sign, or submit legal material without human approval.
 
 ## What this adds over upstream Hermes Agent
 
@@ -60,7 +60,7 @@ For production packaging, use the commands documented in [INSTALL.md](INSTALL.md
 
 ## Provider configuration
 
-LexEdge AI uses the same provider configuration model as Hermes Agent. Configure your preferred LLM provider through environment variables, CLI setup, or desktop settings.
+Hermes - Legal Agent by LexEdge AI uses the same provider configuration model as Hermes Agent. Configure your preferred LLM provider through environment variables, CLI setup, or desktop settings.
 
 Never commit real API keys, OAuth tokens, credentials, client documents, matter exports, logs, databases, or local desktop runtime state.
 
@@ -78,4 +78,4 @@ Also verify Git history, not only the current working tree, if any private docum
 
 This project is released under the MIT License.
 
-LexEdge AI is developed from the original [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent), which is also MIT licensed. Copyright notices for both upstream and LexEdge contributors are preserved in [LICENSE](LICENSE).
+Hermes - Legal Agent by LexEdge AI is developed from the original [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent), which is also MIT licensed. Copyright notices for both upstream and LexEdge contributors are preserved in [LICENSE](LICENSE).

@@ -1,10 +1,10 @@
-# LexEdge AI Windows installer runbook
+# Hermes - Legal Agent by LexEdge AI Windows installer runbook
 
 ## Goal
 
 Ship a Windows installer that feels safe for non-technical legal users:
 
-- installs LexEdge AI as a normal Start Menu/Desktop app
+- installs Hermes - Legal Agent as a normal Start Menu/Desktop app
 - provisions user-scoped dependencies without admin rights where possible
 - shows clear progress while large dependencies download
 - retries transient network failures automatically
@@ -46,8 +46,8 @@ The macOS machine can prepare the source and ZIP artifact, but reliable `.exe` /
 
 1. User downloads `LexEdge-AI-<version>-win-x64.exe`.
 2. Installer creates Start Menu and Desktop shortcuts.
-3. Installer launches LexEdge AI.
-4. LexEdge shows "Setting up LexEdge Legal Hermes Agent".
+3. Installer launches Hermes - Legal Agent.
+4. Hermes - Legal Agent shows "Setting up LexEdge Legal Hermes Agent".
 5. The setup overlay shows completed steps, current stage, elapsed time, recent output, and retry/download messages.
 6. If setup fails, the user sees a clear error, can copy installer output, and can reload/retry without deleting chats or settings.
 

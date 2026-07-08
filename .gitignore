@@ -166,7 +166,7 @@ RELEASE_v*.md
 # walkthroughs). Throwaway artifacts, never part of the app.
 apps/desktop/demo/
 
-# LexEdge public-release safety: local runtime state and private legal material
+# Hermes - Legal Agent public-release safety: local runtime state and private legal material
 .plans/
 *.log
 *.db

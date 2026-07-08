@@ -1,6 +1,6 @@
 # UI Development Guide
 
-This guide explains how to update the LexEdge desktop UI.
+This guide explains how to update the Hermes - Legal Agent desktop UI.
 
 ## UI Stack
 

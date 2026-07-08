@@ -1,10 +1,10 @@
 # Developer Handbook
 
-This handbook explains how to use this codebase as the base for future LexEdge Personal AI Assistant enhancements, including Indian legal workflows, enterprise features, messaging, matters, AI providers, agents, and skills.
+This handbook explains how to use this codebase as the base for future Hermes - Legal Agent by LexEdge AI enhancements, including Indian legal workflows, enterprise features, messaging, matters, AI providers, agents, and skills.
 
 ## What This App Is
 
-LexEdge Personal AI Assistant is a lawyer-focused desktop application built on Hermes Agent. The current product direction is:
+Hermes - Legal Agent by LexEdge AI is a lawyer-focused desktop application built on Hermes Agent. The current product direction is:
 
 - Local-first personal AI assistant for Indian legal work.
 - Draft-only legal outputs with human review before filing, sending, or submission.

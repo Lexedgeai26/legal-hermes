@@ -1,10 +1,10 @@
-# Installing and Building LexEdge AI
+# Installing and Building Hermes - Legal Agent by LexEdge AI
 
-LexEdge AI is an open-source legal-focused assistant built on the MIT-licensed Hermes Agent runtime by Nous Research.
+Hermes - Legal Agent by LexEdge AI is an open-source legal-focused assistant built on the MIT-licensed Hermes Agent runtime by Nous Research.
 
 This guide covers:
 
-- using LexEdge from the CLI
+- using Hermes - Legal Agent from the CLI
 - running the desktop app in development
 - building desktop packages for macOS and Windows
 - importing legal skills
@@ -50,7 +50,7 @@ uv pip install -e ".[all,dev]"
 
 ## Run the CLI
 
-Start LexEdge/Hermes from the repo root:
+Start Hermes - Legal Agent from the repo root:
 
 ```bash
 source .venv/bin/activate
@@ -81,7 +81,7 @@ python -m hermes_cli.main gateway start
 
 ## Configure model providers
 
-LexEdge is model-provider agnostic. Configure one or more providers through setup or environment variables.
+Hermes - Legal Agent is model-provider agnostic. Configure one or more providers through setup or environment variables.
 
 Examples:
 
@@ -115,7 +115,7 @@ This starts:
 
 - Vite renderer on `127.0.0.1:5174`
 - Electron desktop shell
-- local LexEdge/Hermes backend from the current repo
+- local Hermes - Legal Agent backend from the current repo
 
 If another desktop instance is already running, close it first to avoid backend or profile conflicts.
 
@@ -211,7 +211,7 @@ macOS can cross-build a Windows ZIP, but NSIS/MSI packaging is more reliable on 
 
 ## Import legal skills
 
-LexEdge supports bundled legal skills and imported Claude Code legal plugin suites.
+Hermes - Legal Agent supports bundled legal skills and imported Claude Code legal plugin suites.
 
 Desktop flow:
 
@@ -236,9 +236,9 @@ python -m hermes_cli.main skills import https://github.com/anthropics/claude-for
 python -m hermes_cli.main skills import https://github.com/anthropics/claude-for-legal
 ```
 
-Imported legal plugins are organized into existing LexEdge legal skill groups where possible.
+Imported legal plugins are organized into existing Hermes legal skill groups where possible.
 
-## Use LexEdge for legal work
+## Use Hermes - Legal Agent for legal work
 
 Example prompts:
 
@@ -258,7 +258,7 @@ Draft a reply to this legal notice for lawyer review. Do not send it.
 Extract parties, obligations, dates, deadlines, and missing facts from this document.
 ```
 
-LexEdge outputs are drafts and should be reviewed by a qualified lawyer before use.
+Hermes - Legal Agent outputs are drafts and should be reviewed by a qualified lawyer before use.
 
 ## Public release checklist
 
@@ -274,9 +274,9 @@ If sensitive files were committed, deleting them in the latest commit is not eno
 
 ## License and attribution
 
-LexEdge AI is MIT licensed.
+Hermes - Legal Agent by LexEdge AI is MIT licensed.
 
-LexEdge AI is developed from the original MIT-licensed Hermes Agent project:
+Hermes - Legal Agent by LexEdge AI is developed from the original MIT-licensed Hermes Agent project:
 
 - Upstream: https://github.com/NousResearch/hermes-agent
 - Original project: Nous Research
