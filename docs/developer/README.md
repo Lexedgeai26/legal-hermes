@@ -41,7 +41,7 @@ Useful variants:
 
 ```bash
 HERMES_HOME=/tmp/lexedge-dev npm --workspace apps/desktop run dev
-HERMES_DESKTOP_HERMES_ROOT=/Users/chiraghome/dev/hermes-lex/hermes-agent npm --workspace apps/desktop run dev
+HERMES_DESKTOP_HERMES_ROOT=<repo-root> npm --workspace apps/desktop run dev
 npm --workspace apps/desktop run dev:fake-boot
 ```
 

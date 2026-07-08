@@ -165,3 +165,24 @@ RELEASE_v*.md
 # Desktop demo-run scratch output (hermes writes demo/*.txt during recorded
 # walkthroughs). Throwaway artifacts, never part of the app.
 apps/desktop/demo/
+
+# LexEdge public-release safety: local runtime state and private legal material
+.plans/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+.hermes/
+apps/desktop/.hermes/
+*.docx
+*.pdf
+*.xlsx
+*.pptx
+*NDA*
+*nda*
+*contract*
+*Contract*
+*client*
+*Client*
+*matter*
+*Matter*

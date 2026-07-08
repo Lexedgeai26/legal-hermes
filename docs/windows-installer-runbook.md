@@ -28,7 +28,7 @@ Why this path:
 Cross-build ZIP on macOS:
 
 ```bash
-cd /Users/chiraghome/dev/hermes-lex/hermes-agent/apps/desktop
+cd <repo-root>/apps/desktop
 npm run dist:win:zip
 ```
 

@@ -160,7 +160,7 @@ HERMES_HOME=/tmp/lexedge-ui-dev npm --workspace apps/desktop run dev
 After `npm --workspace apps/desktop run build`, repack the installed app if the user needs to see the change immediately:
 
 ```bash
-APP_RES="/Users/chiraghome/Applications/LexEdge AI.app/Contents/Resources"
+APP_RES="~/Applications/LexEdge AI.app/Contents/Resources"
 STAMP="$(date +%Y%m%d%H%M%S)"
 TMP="$(mktemp -d)"
 cp "$APP_RES/app.asar" "$APP_RES/app.asar.before-ui-$STAMP"
@@ -173,6 +173,6 @@ npx asar pack "$TMP/app" "$APP_RES/app.asar"
 rm -rf "$TMP"
 osascript -e 'tell application "LexEdge AI" to quit' || true
 sleep 2
-open -a "/Users/chiraghome/Applications/LexEdge AI.app"
+open -a "~/Applications/LexEdge AI.app"
 ```
 

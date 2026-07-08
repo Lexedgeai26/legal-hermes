@@ -62,7 +62,7 @@ Use this when the installed app must reflect local frontend changes immediately.
 ```bash
 npm --workspace apps/desktop run build
 
-APP_RES="/Users/chiraghome/Applications/LexEdge AI.app/Contents/Resources"
+APP_RES="~/Applications/LexEdge AI.app/Contents/Resources"
 STAMP="$(date +%Y%m%d%H%M%S)"
 TMP="$(mktemp -d)"
 cp "$APP_RES/app.asar" "$APP_RES/app.asar.before-$STAMP"
@@ -75,7 +75,7 @@ npx asar pack "$TMP/app" "$APP_RES/app.asar"
 rm -rf "$TMP"
 osascript -e 'tell application "LexEdge AI" to quit' || true
 sleep 2
-open -a "/Users/chiraghome/Applications/LexEdge AI.app"
+open -a "~/Applications/LexEdge AI.app"
 ```
 
 ## Update Installed Backend Runtime During Development
@@ -85,11 +85,11 @@ If backend Python code changes and the installed app uses `~/.hermes/hermes-agen
 Example:
 
 ```bash
-cp hermes_cli/matters.py /Users/chiraghome/.hermes/hermes-agent/hermes_cli/matters.py
-python -m py_compile /Users/chiraghome/.hermes/hermes-agent/hermes_cli/matters.py
+cp hermes_cli/matters.py ~/.hermes/hermes-agent/hermes_cli/matters.py
+python -m py_compile ~/.hermes/hermes-agent/hermes_cli/matters.py
 osascript -e 'tell application "LexEdge AI" to quit' || true
 sleep 2
-open -a "/Users/chiraghome/Applications/LexEdge AI.app"
+open -a "~/Applications/LexEdge AI.app"
 ```
 
 Prefer full installer/update flows for production. Direct copying is for local development only.
