@@ -119,6 +119,14 @@ function packagedSourceArchive() {
   return packagedBootstrapPath('hermes-agent-source.zip')
 }
 
+// Only present in the "-offline-setup.exe" installer variant (see
+// apps/desktop/scripts/build-offline-bundle.cjs and the "win-offline"
+// electron-builder target) -- absent from the standard installer, so this
+// resolves to null there and install.ps1 runs its normal online stages.
+function packagedOfflineBundle() {
+  return packagedBootstrapPath('offline')
+}
+
 function cachedScriptPath(hermesHome, commit) {
   return path.join(bootstrapCacheDir(hermesHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
 }
@@ -481,6 +489,10 @@ function buildPinArgs(installStamp) {
   if (sourceArchive) {
     args.push('-SourceArchive', sourceArchive)
   }
+  const offlineBundle = packagedOfflineBundle()
+  if (offlineBundle) {
+    args.push('-OfflineBundle', offlineBundle)
+  }
   return args
 }
 
@@ -756,5 +768,6 @@ module.exports = {
   installedAgentInstallScript,
   packagedInstallScript,
   packagedSourceArchive,
+  packagedOfflineBundle,
   cachedScriptPath
 }

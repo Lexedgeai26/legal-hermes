@@ -28,6 +28,20 @@ param(
     # instead of cloning from GitHub. The archive must contain a single top-level
     # source directory.
     [string]$SourceArchive = "",
+    # Optional path to an offline asset bundle (built by
+    # apps/desktop/scripts/build-offline-bundle.cjs and shipped only in the
+    # "-offline-setup.exe" installer variant, never the standard one). When
+    # set, every stage that would otherwise hit the network for a runtime
+    # dependency (uv, Python, Git, Node, the dependency wheelhouse) uses the
+    # matching asset from this directory instead -- verified against
+    # manifest.json's checksums first. GitHub, PyPI, the npm registry, and
+    # Playwright's download servers are never contacted while this is set.
+    # Node.js dependencies / Playwright Chromium (browser tools) are NOT
+    # currently bundled (see Install-NodeDeps) and are skipped outright in
+    # offline mode rather than silently falling back to network -- browser
+    # tools already degrade gracefully when absent, same as an online
+    # install where Node failed to install.
+    [string]$OfflineBundle = "",
     [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
     [string]$InstallDir = $(if ($env:HERMES_HOME) { "$env:HERMES_HOME\hermes-agent" } else { "$env:LOCALAPPDATA\hermes\hermes-agent" }),
 
@@ -440,6 +454,70 @@ function Get-PowerShellHostExe {
     return "powershell"
 }
 
+# ============================================================================
+# Offline bundle (-OfflineBundle)
+# ============================================================================
+
+function Get-OfflineManifest {
+    if (-not $OfflineBundle) { return $null }
+    if ($script:OfflineManifestCache) { return $script:OfflineManifestCache }
+    $manifestPath = Join-Path $OfflineBundle "manifest.json"
+    if (-not (Test-Path $manifestPath)) {
+        throw "Offline bundle manifest not found at $manifestPath -- this installer build is incomplete. Please re-download it."
+    }
+    $script:OfflineManifestCache = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    return $script:OfflineManifestCache
+}
+
+function Get-OfflineAssetPath {
+    <#
+    .SYNOPSIS
+    Resolve and checksum-verify a bundled offline runtime asset by its
+    manifest key ("uv", "python", "git", "node", or "ripgrep"). Throws with
+    a specific, actionable message on any failure -- missing manifest entry,
+    missing file, or a checksum mismatch -- and NEVER falls through to a
+    network call. Every offline-mode stage below routes through this so a
+    corrupted or incomplete installer build fails loudly and immediately
+    instead of silently degrading or hitting the network anyway.
+    #>
+    param([Parameter(Mandatory=$true)][string]$Key)
+
+    $manifest = Get-OfflineManifest
+    $entry = $manifest.assets.$Key
+    if (-not $entry) {
+        throw "Offline bundle manifest has no entry for required asset '$Key'. This installer build is incomplete."
+    }
+    $assetPath = Join-Path $OfflineBundle $entry.file
+    if (-not (Test-Path $assetPath)) {
+        throw "Required offline asset missing: $($entry.file) (expected at $assetPath). This installer build is incomplete or corrupted -- please re-download it."
+    }
+    $actualHash = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash
+    if ($actualHash -ne $entry.sha256.ToUpper()) {
+        throw "Offline asset failed checksum verification: $($entry.file) (expected $($entry.sha256), got $actualHash). This installer may be corrupted or tampered with -- please re-download it."
+    }
+    return $assetPath
+}
+
+function Get-OfflineWheelhousePath {
+    <#
+    .SYNOPSIS
+    Resolve, checksum-verify, and extract the bundled Python dependency
+    wheelhouse (shipped as a single wheelhouse.zip -- packaging it as ~100
+    loose .whl files made electron-builder's extraResources file walk hit a
+    memory wall, see build-offline-bundle.cjs). Returns the extracted
+    directory for use with `uv sync --find-links`.
+    #>
+    $wheelhouseZip = Get-OfflineAssetPath -Key "wheelhouse"
+    $wheelhouseDir = Join-Path $env:TEMP ("hermes-wheelhouse-" + (Get-Date -Format "HHmmssfff"))
+    if (Test-Path $wheelhouseDir) { Remove-Item -Recurse -Force $wheelhouseDir }
+    Expand-Archive -Path $wheelhouseZip -DestinationPath $wheelhouseDir -Force
+    $wheelCount = (Get-ChildItem -Path $wheelhouseDir -Filter "*.whl" -ErrorAction SilentlyContinue | Measure-Object).Count
+    if ($wheelCount -eq 0) {
+        throw "Offline wheelhouse archive extracted but contained no .whl files. This installer build is incomplete or corrupted -- please re-download it."
+    }
+    return $wheelhouseDir
+}
+
 function Install-Uv {
     # Hermes owns its own uv at $HermesHome\bin\uv.exe.  Always install there —
     # no PATH probing, no conda guards, no multi-location resolution chains.
@@ -454,8 +532,35 @@ function Install-Uv {
         return $true
     }
 
-    Write-Info "Installing managed uv into $HermesHome\bin ..."
     New-Item -ItemType Directory -Path (Join-Path $HermesHome "bin") -Force | Out-Null
+
+    if ($OfflineBundle) {
+        Write-Info "Installing uv from offline bundle..."
+        try {
+            $uvZip = Get-OfflineAssetPath -Key "uv"
+            $extractTmp = Join-Path $env:TEMP ("uv-offline-" + (Get-Date -Format "HHmmssfff"))
+            Expand-Archive -Path $uvZip -DestinationPath $extractTmp -Force
+            $uvExeSrc = Get-ChildItem -Path $extractTmp -Recurse -Filter "uv.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $uvExeSrc) {
+                throw "uv.exe not found inside the offline bundle's uv archive"
+            }
+            Copy-Item -LiteralPath $uvExeSrc.FullName -Destination $managedUv -Force
+            Remove-Item -Recurse -Force $extractTmp -ErrorAction SilentlyContinue
+
+            if (-not (Test-Path $managedUv)) {
+                throw "uv.exe copy from offline bundle did not produce $managedUv"
+            }
+            $script:UvCmd = $managedUv
+            $version = & $managedUv --version
+            Write-Success "Managed uv installed from offline bundle ($version)"
+            return $true
+        } catch {
+            Write-Err "Offline uv install failed: $_"
+            return $false
+        }
+    }
+
+    Write-Info "Installing managed uv into $HermesHome\bin ..."
 
     # UV_INSTALL_DIR tells the astral installer to place the binary
     # directly into $HermesHome\bin instead of ~/.local/bin.
@@ -549,7 +654,57 @@ function Resolve-UvCmd {
 
 function Test-Python {
     Write-Info "Checking Python $PythonVersion..."
-    
+
+    if ($OfflineBundle) {
+        # Deterministic, self-contained: always use the bundled interpreter
+        # rather than `uv python find`'s broader system search, so offline
+        # installs behave identically to what was actually tested, rather
+        # than depending on whatever Python happens to be discoverable on
+        # a given machine. Install-Venv/Install-Dependencies below use this
+        # same $HermesHome\python\ path directly.
+        $offlinePythonExe = Join-Path $HermesHome "python\python.exe"
+        if (Test-Path $offlinePythonExe) {
+            $ver = & $offlinePythonExe --version 2>$null
+            Write-Success "Python found (offline bundle): $ver"
+            return $true
+        }
+        Write-Info "Installing Python from offline bundle..."
+        try {
+            $pyTarball = Get-OfflineAssetPath -Key "python"
+            $pyDir = Join-Path $HermesHome "python"
+            if (Test-Path $pyDir) { Remove-Item -Recurse -Force $pyDir }
+
+            $tarExtractTmp = Join-Path $env:TEMP ("py-offline-" + (Get-Date -Format "HHmmssfff"))
+            New-Item -ItemType Directory -Force -Path $tarExtractTmp | Out-Null
+            # tar.exe ships built into Windows 10 1803+ / Windows 11 and
+            # handles .tar.gz directly -- no separate gzip step needed.
+            tar -xzf $pyTarball -C $tarExtractTmp
+            if ($LASTEXITCODE -ne 0) {
+                throw "tar extraction of the bundled Python archive failed (exit $LASTEXITCODE)"
+            }
+
+            # python-build-standalone's install_only layout has a single
+            # top-level "python/" directory containing python.exe.
+            $extractedPythonDir = Join-Path $tarExtractTmp "python"
+            if (-not (Test-Path (Join-Path $extractedPythonDir "python.exe"))) {
+                throw "Bundled Python archive did not contain python.exe at the expected path"
+            }
+            New-Item -ItemType Directory -Force -Path (Split-Path $pyDir) -ErrorAction SilentlyContinue | Out-Null
+            Move-Item -LiteralPath $extractedPythonDir -Destination $pyDir -Force
+            Remove-Item -Recurse -Force $tarExtractTmp -ErrorAction SilentlyContinue
+
+            if (-not (Test-Path $offlinePythonExe)) {
+                throw "Offline Python extraction did not produce $offlinePythonExe"
+            }
+            $ver = & $offlinePythonExe --version 2>$null
+            Write-Success "Python installed from offline bundle: $ver"
+            return $true
+        } catch {
+            Write-Err "Offline Python install failed: $_"
+            return $false
+        }
+    }
+
     # Let uv find or install Python
     try {
         $pythonPath = & $UvCmd python find $PythonVersion 2>$null
@@ -565,40 +720,58 @@ function Test-Python {
     # Capture EAP outside the try block so the catch's restore call always
     # has a meaningful value (see Install-Uv for the full rationale).
     $prevEAP = $ErrorActionPreference
-    try {
-        # Temporarily relax ErrorActionPreference: uv writes download progress
-        # ("Downloading cpython-3.11.15-windows-x86_64-none (24.5MiB)") to
-        # stderr.  With $ErrorActionPreference = "Stop" (set at the top of this
-        # script) PowerShell wraps stderr lines from native commands as
-        # ErrorRecord objects when captured via 2>&1, then throws a terminating
-        # exception on the first one -- even though uv exits 0 and Python was
-        # installed successfully.  Verify success via `uv python find`
-        # afterwards, which is the reliable signal regardless of exit-code
-        # semantics or stderr noise.  This fix was previously landed as
-        # commit ec1714e71 and then lost in a release squash; reapplied here.
-        $ErrorActionPreference = "Continue"
-        $uvOutput = & $UvCmd python install $PythonVersion 2>&1
-        $uvExitCode = $LASTEXITCODE
-        $ErrorActionPreference = $prevEAP
+    # Retry a few times with backoff: some corporate antivirus/EDR products
+    # briefly quarantine or lock a freshly-written interpreter (python.exe or
+    # one of its DLLs) for a second or two right after uv extracts it, which
+    # makes the immediate `uv python find` verification below fail even
+    # though the install itself succeeded. A real blocker (no internet,
+    # firewall) still fails after these retries exhaust.
+    $maxPythonAttempts = 3
+    for ($pyAttempt = 1; $pyAttempt -le $maxPythonAttempts; $pyAttempt++) {
+        try {
+            # Temporarily relax ErrorActionPreference: uv writes download progress
+            # ("Downloading cpython-3.11.15-windows-x86_64-none (24.5MiB)") to
+            # stderr.  With $ErrorActionPreference = "Stop" (set at the top of this
+            # script) PowerShell wraps stderr lines from native commands as
+            # ErrorRecord objects when captured via 2>&1, then throws a terminating
+            # exception on the first one -- even though uv exits 0 and Python was
+            # installed successfully.  Verify success via `uv python find`
+            # afterwards, which is the reliable signal regardless of exit-code
+            # semantics or stderr noise.  This fix was previously landed as
+            # commit ec1714e71 and then lost in a release squash; reapplied here.
+            $ErrorActionPreference = "Continue"
+            $uvOutput = & $UvCmd python install $PythonVersion 2>&1
+            $uvExitCode = $LASTEXITCODE
+            $ErrorActionPreference = $prevEAP
 
-        # Check if Python is now available (more reliable than exit code
-        # since uv may return non-zero due to "already installed" etc.)
-        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
-        if ($pythonPath) {
-            $ver = & $pythonPath --version 2>$null
-            Write-Success "Python installed: $ver"
-            return $true
+            # Give antivirus real-time scanning a moment to finish inspecting
+            # the freshly-extracted interpreter before we run it.
+            Start-Sleep -Milliseconds 500
+
+            # Check if Python is now available (more reliable than exit code
+            # since uv may return non-zero due to "already installed" etc.)
+            $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+            if ($pythonPath) {
+                $ver = & $pythonPath --version 2>$null
+                Write-Success "Python installed: $ver"
+                return $true
+            }
+
+            # uv ran but Python still not findable -- show what happened
+            if ($uvExitCode -ne 0) {
+                Write-Warn "uv python install output:"
+                Write-Host $uvOutput -ForegroundColor DarkGray
+            }
+        } catch {
+            # Restore EAP in case the try block threw before the assignment
+            if ($prevEAP) { $ErrorActionPreference = $prevEAP }
+            Write-Warn "uv python install error: $_"
         }
 
-        # uv ran but Python still not findable -- show what happened
-        if ($uvExitCode -ne 0) {
-            Write-Warn "uv python install output:"
-            Write-Host $uvOutput -ForegroundColor DarkGray
+        if ($pyAttempt -lt $maxPythonAttempts) {
+            Write-Info "Retrying Python install (attempt $($pyAttempt + 1) of $maxPythonAttempts) -- this can happen when antivirus briefly quarantines a newly-installed interpreter..."
+            Start-Sleep -Seconds (2 * $pyAttempt)
         }
-    } catch {
-        # Restore EAP in case the try block threw before the assignment
-        if ($prevEAP) { $ErrorActionPreference = $prevEAP }
-        Write-Warn "uv python install error: $_"
     }
 
     # Fallback: check if ANY Python 3.10+ is already available on the system
@@ -697,6 +870,53 @@ function Install-Git {
         Write-Success "Git found ($version)"
         Set-GitBashEnvVar
         return $true
+    }
+
+    if ($OfflineBundle) {
+        Write-Info "Git not found -- installing PortableGit from offline bundle..."
+        try {
+            $arch = Get-WindowsArch
+            if ($arch -ne "x64") {
+                throw "The offline installer only bundles PortableGit for Windows x64 (detected: $arch). Install Git manually from https://git-scm.com/download/win."
+            }
+            $gitDir = "$HermesHome\git"
+            $tmpFile = Get-OfflineAssetPath -Key "git"
+            if (Test-Path $gitDir) { Remove-Item -Recurse -Force $gitDir }
+            New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
+
+            Write-Info "Extracting PortableGit to $gitDir ..."
+            $extractProc = Start-Process -FilePath $tmpFile -ArgumentList "-o`"$gitDir`"", "-y" -NoNewWindow -Wait -PassThru
+            if ($extractProc.ExitCode -ne 0) {
+                throw "PortableGit extraction failed (exit code $($extractProc.ExitCode))"
+            }
+
+            $gitExe = "$gitDir\cmd\git.exe"
+            if (-not (Test-Path $gitExe)) {
+                throw "Git extraction did not produce git.exe at $gitExe"
+            }
+            $env:Path = "$gitDir\cmd;$env:Path"
+            $newPathEntries = @("$gitDir\cmd", "$gitDir\bin", "$gitDir\usr\bin")
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $userPathItems = if ($userPath) { $userPath -split ";" } else { @() }
+            $changed = $false
+            foreach ($entry in $newPathEntries) {
+                if ($userPathItems -notcontains $entry) {
+                    $userPathItems += $entry
+                    $changed = $true
+                }
+            }
+            if ($changed) {
+                [Environment]::SetEnvironmentVariable("Path", ($userPathItems -join ";"), "User")
+            }
+
+            $version = & $gitExe --version
+            Write-Success "Git $version installed from offline bundle to $gitDir (portable, user-scoped)"
+            Set-GitBashEnvVar
+            return $true
+        } catch {
+            Write-Err "Offline Git install failed: $_"
+            return $false
+        }
     }
 
     # Download PortableGit into $HermesHome\git.  Always works as long as
@@ -910,6 +1130,45 @@ function Test-Node {
         return $true
     }
 
+    if ($OfflineBundle) {
+        Write-Info "Installing Node.js from offline bundle..."
+        try {
+            $nodeZip = Get-OfflineAssetPath -Key "node"
+            $tmpDir = Join-Path $env:TEMP ("hermes-node-offline-" + (Get-Date -Format "HHmmssfff"))
+            if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+            Expand-Archive -Path $nodeZip -DestinationPath $tmpDir -Force
+
+            $extractedDir = Get-ChildItem $tmpDir -Directory | Select-Object -First 1
+            if (-not $extractedDir) {
+                throw "Offline Node.js archive did not contain the expected top-level directory"
+            }
+            if (Test-Path "$HermesHome\node") { Remove-Item -Recurse -Force "$HermesHome\node" }
+            Move-Item $extractedDir.FullName "$HermesHome\node"
+            Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+
+            $env:Path = "$HermesHome\node;$env:Path"
+            $nodeDir = "$HermesHome\node"
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $userPathItems = if ($userPath) { $userPath -split ";" } else { @() }
+            if ($userPathItems -notcontains $nodeDir) {
+                $userPathItems += $nodeDir
+                [Environment]::SetEnvironmentVariable("Path", ($userPathItems -join ";"), "User")
+            }
+
+            $version = & "$HermesHome\node\node.exe" --version
+            Write-Success "Node.js $version installed from offline bundle to $HermesHome\node\ (portable, user-scoped)"
+            $script:HasNode = $true
+            return $true
+        } catch {
+            # Not throwing: Stage-Node treats a $false return as a soft
+            # skip (browser tools degrade gracefully) and sets its own
+            # $script:_StageSkippedReason -- setting one here too would
+            # just be overwritten.
+            Write-Warn "Offline Node.js install failed: $_"
+            return $false
+        }
+    }
+
     Write-Info "Installing Hermes-managed Node.js $NodeVersion LTS..."
 
     # Try the portable-zip path FIRST -- no UAC, no admin, no winget MSI.
@@ -1079,6 +1338,43 @@ function Install-SystemPackages {
 
     if (-not $needRipgrep -and -not $needFfmpeg) { return }
 
+    if ($OfflineBundle) {
+        # ffmpeg isn't bundled (not needed for the offline release-gate
+        # scenario -- TTS voice messages already degrade gracefully
+        # without it, same as an online install where it failed). ripgrep
+        # is small enough to bundle and worth having.
+        if ($needRipgrep) {
+            Write-Info "Installing ripgrep from offline bundle..."
+            try {
+                $rgZip = Get-OfflineAssetPath -Key "ripgrep"
+                $tmpDir = Join-Path $env:TEMP ("hermes-rg-offline-" + (Get-Date -Format "HHmmssfff"))
+                if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+                Expand-Archive -Path $rgZip -DestinationPath $tmpDir -Force
+                $rgExeSrc = Get-ChildItem -Path $tmpDir -Recurse -Filter "rg.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not $rgExeSrc) { throw "rg.exe not found inside the offline bundle's ripgrep archive" }
+                New-Item -ItemType Directory -Path (Join-Path $HermesHome "bin") -Force | Out-Null
+                Copy-Item -LiteralPath $rgExeSrc.FullName -Destination (Join-Path $HermesHome "bin\rg.exe") -Force
+                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+
+                $env:Path = "$HermesHome\bin;$env:Path"
+                if (Get-Command rg -ErrorAction SilentlyContinue) {
+                    Write-Success "ripgrep installed from offline bundle"
+                    $script:HasRipgrep = $true
+                    $needRipgrep = $false
+                }
+            } catch {
+                Write-Warn "Offline ripgrep install failed: $_"
+            }
+        }
+        if ($needRipgrep) {
+            Write-Warn "ripgrep not installed (file search will use findstr fallback)"
+        }
+        if ($needFfmpeg) {
+            Write-Warn "ffmpeg not installed (TTS voice messages will be limited) -- not included in the offline installer"
+        }
+        return
+    }
+
     # Build description and package lists for each package manager
     $descParts = @()
     $wingetPkgs = @()
@@ -1221,6 +1517,61 @@ function Install-SystemPackages {
 # ============================================================================
 # Installation
 # ============================================================================
+
+function Initialize-RepoGitState {
+    <#
+    .SYNOPSIS
+    Turn a freshly-extracted source tree at $Path into a git repo pointed at
+    $OriginUrl. Shared by the bundled-source-archive path and the ZIP-
+    fallback path in Install-Repository below -- both need identical git
+    bootstrapping and, before this existed, had drifted into two near-copies
+    of the same fragile inline sequence.
+
+    Failure is judged ONLY by $LASTEXITCODE, never by whether git wrote
+    anything to stderr. `git init` on a brand-new repo unconditionally
+    prints a routine hint to stderr ("hint: Using 'master' as the name for
+    the initial branch...") when no init.defaultBranch is configured --
+    which is the default on any machine where the user has never touched
+    git config. Under this script's global $ErrorActionPreference = "Stop",
+    that harmless hint text was being surfaced as if it were a fatal
+    bootstrap failure, aborting otherwise-successful installs. EAP=Continue
+    here is what stops that; -b main sidesteps the hint at the source by
+    pinning the branch name explicitly instead of leaving it to fall back
+    to git's own (unset) default.
+    #>
+    param(
+        [Parameter(Mandatory=$true)] [string]$Path,
+        [Parameter(Mandatory=$true)] [string]$OriginUrl
+    )
+
+    Push-Location $Path
+    $prevEAP = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+
+        $global:LASTEXITCODE = 0
+        git -c windows.appendAtomically=false init -b main 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "git init failed (exit $LASTEXITCODE) at $Path"
+        }
+
+        git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null
+        git -c windows.appendAtomically=false config core.autocrlf false 2>$null
+
+        # Idempotent: drop any stale origin from a prior partial attempt
+        # first so a retry never fails with "remote origin already exists".
+        git -c windows.appendAtomically=false remote remove origin 2>$null
+
+        $global:LASTEXITCODE = 0
+        git -c windows.appendAtomically=false remote add origin $OriginUrl 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "git remote add origin failed (exit $LASTEXITCODE) at $Path"
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+        Pop-Location
+    }
+}
 
 function Install-Repository {
     Write-Info "Installing to $InstallDir..."
@@ -1425,66 +1776,109 @@ function Install-Repository {
             }
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
             Write-Info "Installing repository from bundled source archive..."
+            # Retry the extract-then-copy sequence a few times with backoff:
+            # some corporate antivirus/EDR products briefly quarantine
+            # newly-extracted script bundles moments after they're written
+            # to %TEMP% -- the marker file (batch_runner.py) can be found
+            # right after Expand-Archive, but by the time Copy-Item runs a
+            # beat later, files (or the whole extracted tree) are gone. A
+            # fresh re-extract with a short settle delay survives that
+            # window. A real blocker (no internet, firewall, corrupted
+            # archive) still fails after these retries exhaust.
+            # How many file entries the archive itself claims to contain --
+            # read once, outside the retry loop, via .NET's zip reader (no
+            # dependency on `zip`/`unzip` being on PATH). Used below to
+            # verify each extraction attempt actually produced the whole
+            # tree instead of a silently-partial one.
+            $expectedFileCount = $null
             try {
-                $archiveLabel = [IO.Path]::GetFileNameWithoutExtension($SourceArchive)
-                $extractPath = Join-Path $env:TEMP ("hermes-agent-source-" + $archiveLabel + "-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
-                if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
-                New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
-                Expand-Archive -Path $SourceArchive -DestinationPath $extractPath -Force
-
-                $repoMarker = Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter "batch_runner.py" -ErrorAction SilentlyContinue |
-                    Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName "pyproject.toml") } |
-                    Select-Object -First 1
-                if (-not $repoMarker) {
-                    $topLevelNames = (Get-ChildItem -LiteralPath $extractPath -Force -ErrorAction SilentlyContinue |
-                        Select-Object -ExpandProperty Name) -join ", "
-                    throw "Source archive did not contain a Hermes repository root with batch_runner.py. Extracted entries: $topLevelNames"
-                }
-
-                $sourceRoot = $repoMarker.DirectoryName
-                $sourceBatchRunner = Join-Path $sourceRoot "batch_runner.py"
-                if (-not (Test-Path -LiteralPath $sourceBatchRunner)) {
-                    throw "Source archive extraction was incomplete: missing $sourceBatchRunner"
-                }
-                New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) -ErrorAction SilentlyContinue | Out-Null
-                if (Test-Path $InstallDir) {
-                    Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
-                }
-                Copy-DirectoryRobust -Source $sourceRoot -Destination $InstallDir
-                $installedBatchRunner = Join-Path $InstallDir "batch_runner.py"
-                if (-not (Test-Path -LiteralPath $installedBatchRunner)) {
-                    $installedNames = (Get-ChildItem -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue |
-                        Select-Object -First 30 -ExpandProperty Name) -join ", "
-                    throw "Bundled source archive copy was incomplete: missing $installedBatchRunner. Installed entries: $installedNames"
-                }
-                Remove-Item -Recurse -Force $extractPath -ErrorAction SilentlyContinue
-
-                Push-Location $InstallDir
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $zipForCount = [System.IO.Compression.ZipFile]::OpenRead($SourceArchive)
                 try {
-                    # Git for Windows prints the default-branch advisory to
-                    # stderr during plain `git init`. With the installer-wide
-                    # `$ErrorActionPreference = Stop`, PowerShell can treat
-                    # that harmless hint as a failed native command even when
-                    # git exits 0. Pin the initial branch and rely on
-                    # LASTEXITCODE for real failures.
-                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false -c init.defaultBranch=main init -b main 2>$null }
-                    if ($LASTEXITCODE -ne 0) { throw "git init failed (exit $LASTEXITCODE)" }
-                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null }
-                    if ($LASTEXITCODE -ne 0) { throw "git config windows.appendAtomically failed (exit $LASTEXITCODE)" }
-                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false config core.autocrlf false 2>$null }
-                    if ($LASTEXITCODE -ne 0) { throw "git config core.autocrlf failed (exit $LASTEXITCODE)" }
-                    Invoke-NativeWithRelaxedErrorAction { git remote add origin $RepoUrlHttps 2>$null }
-                    if ($LASTEXITCODE -ne 0) { throw "git remote add origin failed (exit $LASTEXITCODE)" }
+                    $expectedFileCount = ($zipForCount.Entries | Where-Object { $_.Name }).Count
                 } finally {
-                    Pop-Location
+                    $zipForCount.Dispose()
                 }
-
-                $cloneSuccess = $true
-                $usedSourceArchive = $true
-                Write-Success "Bundled source archive extracted"
             } catch {
-                Write-Err "Bundled source archive install failed: $_"
-                throw
+                Write-Warn "Could not pre-read archive entry count: $_"
+            }
+
+            $maxRepoAttempts = 5
+            $lastError = $null
+            for ($repoAttempt = 1; $repoAttempt -le $maxRepoAttempts; $repoAttempt++) {
+                $extractPath = $null
+                try {
+                    # Keep this folder name SHORT. Windows PowerShell 5.1's
+                    # Expand-Archive is not long-path-aware by default, so
+                    # every character spent here eats directly into the
+                    # 260-char MAX_PATH budget shared with the repository's
+                    # own (sometimes deeply-nested) relative paths --
+                    # deterministically throwing partway through extraction
+                    # once exceeded, on every retry, regardless of
+                    # antivirus or anything else environmental. Millisecond
+                    # precision keeps it unique across this loop's retries
+                    # (which are seconds apart).
+                    $extractPath = Join-Path $env:TEMP ("hs-" + (Get-Date -Format "HHmmssfff"))
+                    if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+                    New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
+                    Expand-Archive -Path $SourceArchive -DestinationPath $extractPath -Force
+
+                    # Give antivirus real-time scanning a moment to finish
+                    # inspecting the freshly-extracted files before we read
+                    # them back for the copy below.
+                    Start-Sleep -Milliseconds 750
+
+                    # Verify the extraction is actually COMPLETE, not just
+                    # that one marker file survived. Checking only for
+                    # batch_runner.py let a silently-partial extraction (most
+                    # files missing) sail through this gate and fail later,
+                    # deeper in the process, with a confusing error about
+                    # whatever file happened to be missing (e.g.
+                    # .dockerignore) instead of the real problem.
+                    $actualFileCount = (Get-ChildItem -LiteralPath $extractPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+                    if ($expectedFileCount -and $actualFileCount -lt $expectedFileCount) {
+                        throw "Extraction incomplete: expected $expectedFileCount files from the archive, found $actualFileCount on disk after extracting."
+                    }
+
+                    $repoMarker = Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter "batch_runner.py" -ErrorAction SilentlyContinue |
+                        Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName "pyproject.toml") } |
+                        Select-Object -First 1
+                    if (-not $repoMarker) {
+                        $topLevelNames = (Get-ChildItem -LiteralPath $extractPath -Force -ErrorAction SilentlyContinue |
+                            Select-Object -ExpandProperty Name) -join ", "
+                        throw "Source archive did not contain a Hermes repository root with batch_runner.py. Extracted entries: $topLevelNames"
+                    }
+
+                    $sourceRoot = $repoMarker.DirectoryName
+                    New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) -ErrorAction SilentlyContinue | Out-Null
+                    if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
+                    # A single directory move instead of a per-file copy loop:
+                    # fewer filesystem operations means a smaller window for
+                    # antivirus/EDR real-time scanning to interfere with, and
+                    # it's faster (same-volume rename instead of N copies).
+                    Move-Item -LiteralPath $sourceRoot -Destination $InstallDir -Force
+                    Remove-Item -Recurse -Force $extractPath -ErrorAction SilentlyContinue
+
+                    Initialize-RepoGitState -Path $InstallDir -OriginUrl $RepoUrlHttps
+
+                    $cloneSuccess = $true
+                    $usedSourceArchive = $true
+                    Write-Success "Bundled source archive extracted"
+                    $lastError = $null
+                    break
+                } catch {
+                    $lastError = $_
+                    if ($extractPath) { Remove-Item -Recurse -Force $extractPath -ErrorAction SilentlyContinue }
+                    if ($repoAttempt -lt $maxRepoAttempts) {
+                        Write-Warn "Bundled source archive install failed (attempt $repoAttempt of $maxRepoAttempts): $_"
+                        Write-Info "Retrying in a few seconds -- this can happen when antivirus briefly quarantines newly extracted files..."
+                        Start-Sleep -Seconds (2 * $repoAttempt)
+                    }
+                }
+            }
+            if ($lastError) {
+                Write-Err "Bundled source archive install failed: $lastError"
+                throw $lastError
             }
         }
 
@@ -1552,12 +1946,8 @@ function Install-Repository {
                     Move-Item $extractedDir.FullName $InstallDir -Force
                     Write-Success "Downloaded and extracted"
 
-                    # Initialize git repo so updates work later
-                    Push-Location $InstallDir
-                    git -c windows.appendAtomically=false init 2>$null
-                    git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null
-                    git remote add origin $RepoUrlHttps 2>$null
-                    Pop-Location
+                    # Initialize git repo so updates work later.
+                    Initialize-RepoGitState -Path $InstallDir -OriginUrl $RepoUrlHttps
                     Write-Success "Git repo initialized for future updates"
 
                     $cloneSuccess = $true
@@ -1647,7 +2037,18 @@ function Install-Venv {
     # normal progress such as "Using CPython ..." on stderr; under Windows
     # PowerShell 5.1 with EAP=Stop that stderr is a NativeCommandError unless
     # we temporarily relax EAP and trust $LASTEXITCODE for real failures.
-    Invoke-NativeWithRelaxedErrorAction { & $UvCmd venv venv --python $PythonVersion }
+    #
+    # Offline mode: pass the bundled interpreter's literal path instead of a
+    # version string, and set UV_OFFLINE=1 as a hard backstop -- uv refuses
+    # ANY network access with it set, so even if the path resolution logic
+    # ever changed to consult the network for some edge case, this call
+    # fails loudly instead of silently reaching out.
+    $venvPythonTarget = $PythonVersion
+    if ($OfflineBundle) {
+        $venvPythonTarget = Join-Path $HermesHome "python\python.exe"
+        $env:UV_OFFLINE = "1"
+    }
+    Invoke-NativeWithRelaxedErrorAction { & $UvCmd venv venv --python $venvPythonTarget }
     # Relaxing EAP above means a *genuine* uv-venv failure (exit != 0) no longer
     # aborts on its own. Capture $LASTEXITCODE immediately and fail fast, so the
     # `venv` stage can't falsely report success (and Invoke-Stage can't emit
@@ -1697,6 +2098,27 @@ function Install-Dependencies {
         if (Test-Path $venvPythonExe) {
             $env:UV_PYTHON = $venvPythonExe
         }
+    }
+
+    if ($OfflineBundle) {
+        # Offline mode gets its own path, not a variant of the tiered
+        # cascade below: every tier past Tier 0 re-resolves from PyPI,
+        # which is exactly what -OfflineBundle promises never to do. If
+        # the hash-verified sync against the bundled wheelhouse fails,
+        # that's a hard failure -- there is no network fallback to try.
+        Write-Info "Installing dependencies from offline wheelhouse..."
+        $wheelhouseDir = Get-OfflineWheelhousePath
+        $env:UV_OFFLINE = "1"
+        $env:UV_PROJECT_ENVIRONMENT = "$InstallDir\venv"
+        Invoke-NativeWithRelaxedErrorAction { & $UvCmd sync --extra all --locked --offline --find-links $wheelhouseDir }
+        if ($LASTEXITCODE -ne 0) {
+            Pop-Location
+            throw "Offline dependency install failed (uv sync --offline exited with $LASTEXITCODE). The bundled wheelhouse may be missing a package uv.lock now requires -- see apps/desktop/scripts/offline-assets-REFRESHING.md."
+        }
+        Write-Success "Main package installed (hash-verified, offline wheelhouse)"
+        $script:InstalledTier = "hash-verified (offline wheelhouse)"
+        Pop-Location
+        return
     }
 
     # Hash-verified install (Tier 0) -- when uv.lock is present, prefer
@@ -2100,6 +2522,18 @@ Delete the contents (or this file) to use the default personality.
 }
 
 function Install-NodeDeps {
+    if ($OfflineBundle) {
+        # Not bundled in the offline installer: the npm registry and
+        # Playwright's Chromium download are both live network dependencies
+        # this stage would otherwise hit, and -OfflineBundle's contract is
+        # to never touch either. Browser tools already degrade gracefully
+        # when Node/Playwright are unavailable (same code path as an online
+        # install where this stage failed), so skipping outright here is
+        # consistent behavior, not a silent capability loss.
+        Write-Info "Skipping Node.js dependencies and Playwright Chromium (not included in the offline installer; browser tools will be unavailable)"
+        $script:_StageSkippedReason = "Node.js dependencies and browser tools are not bundled in the offline installer"
+        return
+    }
     if (-not $HasNode) {
         # Cross-process driver mode (Hermes-Setup.exe runs each -Stage NAME
         # in a fresh powershell.exe) means $script:HasNode set by Stage-Node
@@ -2764,6 +3198,17 @@ function Install-PlatformSdks {
         Write-Info "Skipping platform-SDK verification (-NoVenv: no venv to bootstrap)"
         return
     }
+    if ($OfflineBundle) {
+        # This stage's `pip install <messaging-sdk>` recovery path hits
+        # PyPI directly and isn't covered by the bundled wheelhouse (it's
+        # a last-chance repair for a normally-online install, not part of
+        # the base [all] extra). Only matters if the user has already set
+        # a messaging-platform token in .env, which a fresh offline
+        # install won't have. Skip outright rather than silently reaching
+        # the network.
+        Write-Info "Skipping platform-SDK verification (not available offline; run this manually once online if you configure a messaging platform)"
+        return
+    }
 
     $pythonExe = "$InstallDir\venv\Scripts\python.exe"
     if (-not (Test-Path $pythonExe)) {
@@ -3183,6 +3628,52 @@ function Step-OutOfInstallDir {
     } catch {}
 }
 
+$script:DefenderExclusionAttempted = $false
+function Set-DefenderExclusions {
+    <#
+    .SYNOPSIS
+    Best-effort: ask Windows Defender to skip real-time scanning of Hermes's
+    working directories.
+
+    Why this exists: this installer is unsigned and runs without admin
+    rights by design (see the "no admin rights required" comments on
+    Install-Git/Test-Node above) -- but that combination is exactly what
+    Defender's cloud/behavioral protection treats as a dropper: an
+    unrecognized, unsigned process rapidly writing thousands of unfamiliar
+    script files (the bundled repository source, a portable Python/Git/Node
+    install) to disk. Observed in the wild: a multi-minute real-time scan
+    of the freshly-extracted repository source followed by the ENTIRE batch
+    being quarantined -- a deterministic verdict on this specific content,
+    not a transient race. The retry loops elsewhere in this script (e.g.
+    Install-Repository's) exist for genuinely transient issues and cannot
+    fix a deterministic AV verdict; excluding our own working folders is
+    the only thing that reliably does.
+
+    Silently gives up if Add-MpPreference requires elevation we don't have
+    (the common case for a non-admin install), Defender isn't present, or
+    Tamper Protection blocks it -- this is opportunistic, not required for
+    the rest of the install to proceed.
+    #>
+    if ($script:DefenderExclusionAttempted) { return }
+    $script:DefenderExclusionAttempted = $true
+
+    if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) { return }
+
+    $paths = @($HermesHome, $env:TEMP) | Where-Object { $_ }
+    try {
+        $pref = Get-MpPreference -ErrorAction Stop
+        $existing = @($pref.ExclusionPath)
+        $missing = $paths | Where-Object { $existing -notcontains $_ }
+        if (-not $missing) { return }
+        Add-MpPreference -ExclusionPath $missing -ErrorAction Stop
+        Write-Success "Added Windows Defender exclusions for $($missing -join ', ')"
+    } catch {
+        # Most common case: Add-MpPreference requires admin and we don't
+        # have it. Nothing to do -- continue the install unprivileged, same
+        # as before this function existed.
+    }
+}
+
 function Invoke-Stage {
     param(
         [Parameter(Mandatory=$true)] [hashtable]$StageDef
@@ -3193,6 +3684,7 @@ function Invoke-Stage {
     # No-op in cost-relevant cases (default invocation path syncs once per
     # foreach pass; cross-process drivers get the necessary freshening).
     Sync-EnvPath
+    Set-DefenderExclusions
 
     # Per-stage soft-skip channel.  A worker can populate
     # $script:_StageSkippedReason to surface "ran, but the thing it was

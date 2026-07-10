@@ -30,6 +30,19 @@ const EXCLUDED_PREFIXES = [
   "apps/desktop/dist/",
   "apps/desktop/.vite/",
   "apps/desktop/.cache/",
+  // The Docusaurus marketing/docs site isn't needed to run the Python/Node
+  // runtime -- the only file under website/ actually read at runtime is
+  // website/static/api/model-catalog.json (see hermes_cli/model_catalog.py),
+  // which these prefixes don't touch. i18n/docs are excluded because their
+  // deeply-nested translated paths (up to 159 chars, e.g.
+  // website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/...) blow
+  // past Windows' 260-char MAX_PATH once combined with a %TEMP% extraction
+  // prefix, which made Windows PowerShell 5.1's Expand-Archive (not
+  // long-path-aware by default) throw partway through extraction on
+  // Windows installs -- deterministically, on every retry, since it's a
+  // fixed property of the content, not a transient failure.
+  "website/i18n/",
+  "website/docs/",
 ]
 
 const EXCLUDED_NAMES = new Set([
