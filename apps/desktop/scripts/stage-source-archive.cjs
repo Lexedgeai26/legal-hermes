@@ -102,12 +102,37 @@ function main() {
       void 0
     }
 
-    const zip = spawnSync("zip", ["-qr", OUT_FILE, "hermes-agent"], {
-      cwd: staging,
-      stdio: "inherit",
-    })
-    if (zip.status !== 0) {
-      throw new Error(`zip failed with exit ${zip.status}`)
+    if (process.platform === "win32") {
+      // Git for Windows doesn't bundle a `zip` binary, so a Windows dev
+      // machine building the installer locally has nothing at `zip` on
+      // PATH. Compress-Archive ships with every Windows install (built
+      // into PowerShell 5.1+) and needs nothing extra. Paths are passed
+      // via env vars rather than interpolated into -Command so spaces/
+      // special characters in the staging tempdir path can't break quoting.
+      const ps = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$ErrorActionPreference = 'Stop'; Compress-Archive -Path (Join-Path $env:HERMES_ZIP_SRC 'hermes-agent') -DestinationPath $env:HERMES_ZIP_DEST -Force",
+        ],
+        {
+          stdio: "inherit",
+          env: { ...process.env, HERMES_ZIP_SRC: staging, HERMES_ZIP_DEST: OUT_FILE },
+        }
+      )
+      if (ps.status !== 0) {
+        throw new Error(`Compress-Archive failed with exit ${ps.status}`)
+      }
+    } else {
+      const zip = spawnSync("zip", ["-qr", OUT_FILE, "hermes-agent"], {
+        cwd: staging,
+        stdio: "inherit",
+      })
+      if (zip.status !== 0) {
+        throw new Error(`zip failed with exit ${zip.status}`)
+      }
     }
 
     const sizeMb = fs.statSync(OUT_FILE).size / (1024 * 1024)

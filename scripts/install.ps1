@@ -652,6 +652,63 @@ function Resolve-UvCmd {
     throw "uv is not installed. Run install.ps1 -Stage uv first."
 }
 
+# uv's managed Python cache can be left holding a corrupt/partial entry from
+# a previous run that was killed mid-write (antivirus quarantine, a
+# cancelled/crashed installer, a hard process kill via Task Manager). Once
+# that happens, EVERY `uv python find`/`install`/`list` call fails with
+# "Failed to inspect Python interpreter from managed installations at
+# <path>" regardless of which version is requested, because uv enumerates
+# its whole managed-toolchain directory as part of each of those operations.
+# A plain retry (including re-running the installer) loops on the same
+# broken entry forever. Detect the signature and delete just that one
+# broken interpreter's directory so uv can reinstall cleanly. Returns $true
+# when a broken managed install was found and removed -- caller should retry
+# the uv command once.
+function Remove-BrokenManagedPythonFromErrorText {
+    param([string]$ErrorText)
+
+    if (-not $ErrorText -or $ErrorText -notmatch 'Failed to inspect Python interpreter from managed installations at\s+(?<exe>\S+\.exe)') {
+        return $false
+    }
+
+    # uv wraps the path in backticks in its real error text (e.g. "...at
+    # `C:\...\python.exe`"), which \S+ greedily captures as part of the
+    # match since a backtick isn't whitespace. Strip backticks/quotes from
+    # both ends before treating this as a filesystem path.
+    $brokenExe = $Matches.exe.Trim('`', '"', "'")
+    $brokenDir = Split-Path $brokenExe -Parent
+    if (-not $brokenDir -or -not (Test-Path $brokenDir)) {
+        return $false
+    }
+
+    Write-Warn "Found a corrupted managed Python install at $brokenDir -- removing so uv can reinstall cleanly"
+    try {
+        Remove-Item -Recurse -Force -LiteralPath $brokenDir -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Warn "Could not remove corrupted install: $_"
+        return $false
+    }
+}
+
+# `--only-installed` keeps this a local, offline check (no network hit on
+# every single install run); if the flag doesn't exist on an older uv the
+# command just errors harmlessly and the regex below won't match, so this
+# degrades to a no-op rather than breaking anything.
+function Repair-BrokenManagedPython {
+    $prevEAP = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $listOutput = & $UvCmd python list --only-installed 2>&1 | Out-String
+    } catch {
+        $listOutput = ""
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+
+    return Remove-BrokenManagedPythonFromErrorText $listOutput
+}
+
 function Test-Python {
     Write-Info "Checking Python $PythonVersion..."
 
@@ -705,6 +762,10 @@ function Test-Python {
         }
     }
 
+    if (Repair-BrokenManagedPython) {
+        Write-Info "Repaired a corrupted managed Python install; retrying..."
+    }
+
     # Let uv find or install Python
     try {
         $pythonPath = & $UvCmd python find $PythonVersion 2>$null
@@ -714,7 +775,7 @@ function Test-Python {
             return $true
         }
     } catch { }
-    
+
     # Python not found -- use uv to install it (no admin needed!)
     Write-Info "Python $PythonVersion not found, installing via uv..."
     # Capture EAP outside the try block so the catch's restore call always
@@ -761,11 +822,26 @@ function Test-Python {
             if ($uvExitCode -ne 0) {
                 Write-Warn "uv python install output:"
                 Write-Host $uvOutput -ForegroundColor DarkGray
+
+                # Belt-and-suspenders: uv's `install` subcommand enumerating
+                # managed installs is a separate code path from `list` (the
+                # proactive Repair-BrokenManagedPython probe above), so a
+                # corruption that only manifests here still gets caught --
+                # the next loop iteration's `uv python install` runs against
+                # a clean cache instead of dead-ending the whole stage.
+                if (Remove-BrokenManagedPythonFromErrorText ($uvOutput | Out-String)) {
+                    Write-Info "Repaired a corrupted managed Python install; retrying..."
+                }
             }
         } catch {
             # Restore EAP in case the try block threw before the assignment
             if ($prevEAP) { $ErrorActionPreference = $prevEAP }
-            Write-Warn "uv python install error: $_"
+            $installErrorText = "$_"
+            Write-Warn "uv python install error: $installErrorText"
+
+            if (Remove-BrokenManagedPythonFromErrorText $installErrorText) {
+                Write-Info "Repaired a corrupted managed Python install; retrying..."
+            }
         }
 
         if ($pyAttempt -lt $maxPythonAttempts) {
@@ -2650,103 +2726,7 @@ function Install-NodeDeps {
     if (Test-Path "$InstallDir\package.json") {
         Write-Info "Installing Node.js dependencies (browser tools)..."
         $browserLog = "$env:TEMP\hermes-npm-browser-$(Get-Random).log"
-        $browserNpmOk = _Run-NpmInstall "Browser tools" $InstallDir $browserLog $npmExe
-
-        # Install Playwright Chromium (mirrors scripts/install.sh behaviour for
-        # Linux).  Without this, tools/browser_tool.py::check_browser_requirements
-        # returns False (no Chromium under %LOCALAPPDATA%\ms-playwright), and the
-        # browser_* tools are silently filtered out of the agent's tool schema.
-        # System Chrome at "C:\Program Files\Google\Chrome\..." is NOT used by
-        # agent-browser -- it expects a Playwright-managed Chromium.
-        if ($browserNpmOk) {
-            Write-Info "Installing browser engine (Playwright Chromium)..."
-            # npx lives next to npm in the same bin dir.  Prefer .cmd to dodge
-            # the same execution-policy gotcha that affects npm.ps1 (see above).
-            $npmDir = Split-Path $npmExe -Parent
-            $npxExe = $null
-            foreach ($cand in @("npx.cmd", "npx.exe", "npx")) {
-                $try = Join-Path $npmDir $cand
-                if (Test-Path $try) { $npxExe = $try; break }
-            }
-            if (-not $npxExe) {
-                $npxCmd = Get-Command npx -ErrorAction SilentlyContinue
-                if ($npxCmd) { $npxExe = $npxCmd.Source }
-            }
-            if (-not $npxExe) {
-                Write-Warn "npx not found -- cannot install Playwright Chromium."
-                Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
-            } else {
-                $pwLog = "$env:TEMP\hermes-playwright-install-$(Get-Random).log"
-                Push-Location $InstallDir
-                # Capture EAP outside the try block so the catch's restore call
-                # always has a meaningful value (see Install-Uv for the full
-                # rationale).
-                $prevEAP = $ErrorActionPreference
-                try {
-                    # Playwright Chromium is ~170MB compressed and the
-                    # download regularly takes 3-10 minutes on a fresh
-                    # VM.  Tee the output to console + log so the user
-                    # sees download progress in real time instead of
-                    # staring at a silent prompt that looks hung.  See
-                    # _Run-NpmInstall above for the same pattern and
-                    # the rationale behind 2>&1 before the pipe.
-                    Write-Info "(this can take several minutes -- streaming progress below)"
-                    # --yes auto-accepts npx's "Need to install playwright@X.Y.Z"
-                    # confirmation prompt.  Without it, npx 7+ blocks on stdin
-                    # waiting for a y/N answer that never comes when this is
-                    # invoked through a pipeline (Tee-Object disconnects stdin
-                    # from the user's TTY), and the install hangs indefinitely
-                    # after printing "Need to install the following packages:
-                    # playwright@X.Y.Z".
-                    #
-                    # Relax EAP around the playwright invocation: playwright
-                    # emits a "Chromium downloaded to ..." success banner to
-                    # stderr after a successful install.  Under EAP=Stop, the
-                    # 2>&1 merge wraps those stderr lines as ErrorRecord
-                    # objects and throws -- causing this catch block to fire
-                    # with a mangled banner as the error message even though
-                    # the install actually succeeded.  Check $LASTEXITCODE
-                    # instead, which is the reliable signal.
-                    #
-                    # The ForEach-Object { "$_" } coercion BEFORE Tee-Object
-                    # is a cosmetic polish: with bare 2>&1, PowerShell still
-                    # renders stderr lines through its NativeCommandError
-                    # formatter (the red "npx.cmd : ..." block).  Coercing
-                    # each pipeline item to a string strips that wrapper so
-                    # the user sees clean playwright output instead of the
-                    # alarming-looking error formatting.
-                    $ErrorActionPreference = "Continue"
-                    & $npxExe --yes playwright install chromium 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $pwLog
-                    $pwCode = $LASTEXITCODE
-                    $ErrorActionPreference = $prevEAP
-                    if ($pwCode -eq 0) {
-                        Write-Success "Playwright Chromium installed (browser tools ready)"
-                        Remove-Item -Force $pwLog -ErrorAction SilentlyContinue
-                    } else {
-                        Write-Warn "Playwright Chromium install failed -- exit code $pwCode"
-                        Write-Warn "Browser tools will not work until Chromium is installed."
-                        if (Test-Path $pwLog) {
-                            $pwErr = Get-Content $pwLog -Raw -ErrorAction SilentlyContinue
-                            if ($pwErr) {
-                                $snippet = if ($pwErr.Length -gt 1200) { $pwErr.Substring(0, 1200) + "..." } else { $pwErr }
-                                Write-Info "  playwright output:"
-                                foreach ($line in $snippet -split "`n") {
-                                    Write-Host "    $line" -ForegroundColor DarkGray
-                                }
-                                Write-Info "  Full log: $pwLog"
-                            }
-                        }
-                        Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
-                    }
-                } catch {
-                    if ($prevEAP) { $ErrorActionPreference = $prevEAP }
-                    Write-Warn "Playwright Chromium install could not be launched: $_"
-                    Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
-                } finally {
-                    Pop-Location
-                }
-            }
-        }
+        [void](_Run-NpmInstall "Browser tools" $InstallDir $browserLog $npmExe)
     }
 
     # TUI
@@ -2755,6 +2735,139 @@ function Install-NodeDeps {
         Write-Info "Installing TUI dependencies..."
         $tuiLog = "$env:TEMP\hermes-npm-tui-$(Get-Random).log"
         [void](_Run-NpmInstall "TUI" $tuiDir $tuiLog $npmExe)
+    }
+}
+
+# Split out from Install-NodeDeps into its own stage so a Chromium download/
+# extraction stall -- the single largest, slowest part of setup (~170MB
+# compressed, hundreds of extracted files, 3-10 minutes on a fresh VM) --
+# can never block the rest of the install. This function itself already
+# degrades gracefully on a clean failure (sets $script:_StageSkippedReason
+# instead of throwing, same pattern Stage-Node uses). The other half of the
+# fix is in bootstrap-runner.cjs: this stage is marked Optional in the
+# manifest, so even a hard timeout-kill (the whole process terminated
+# externally, which no amount of in-script error handling can catch) is
+# treated as a warning there, not a fatal abort. Net effect: the user always
+# ends up with a working install; at worst, browser_* agent tools are
+# unavailable until installed manually.
+function Install-BrowserEngine {
+    if ($OfflineBundle) {
+        Write-Info "Skipping browser engine (not included in the offline installer)"
+        return
+    }
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Info "Skipping browser engine (npm not available)"
+        return
+    }
+    if (-not (Test-Path "$InstallDir\node_modules\agent-browser")) {
+        Write-Info "Skipping browser engine (browser tools were not installed)"
+        return
+    }
+
+    # Mirrors scripts/install.sh behaviour for Linux. Without this,
+    # tools/browser_tool.py::check_browser_requirements returns False (no
+    # Chromium under %LOCALAPPDATA%\ms-playwright), and the browser_* tools
+    # are silently filtered out of the agent's tool schema. System Chrome at
+    # "C:\Program Files\Google\Chrome\..." is NOT used by agent-browser --
+    # it expects a Playwright-managed Chromium, unless overridden below.
+    $preExistingBrowser = Find-SystemBrowser
+    if ($preExistingBrowser) {
+        Write-Info "AGENT_BROWSER_EXECUTABLE_PATH is already set ($preExistingBrowser) -- skipping the Playwright Chromium download"
+        Write-BrowserEnv -BrowserPath $preExistingBrowser
+        return
+    }
+
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    $npmExe = $npmCmd.Source
+    if ($npmExe -like "*.ps1") {
+        $npmCmdSibling = Join-Path (Split-Path $npmExe -Parent) "npm.cmd"
+        if (Test-Path $npmCmdSibling) { $npmExe = $npmCmdSibling }
+    }
+
+    Write-Info "Installing browser engine (Playwright Chromium)..."
+    # npx lives next to npm in the same bin dir.  Prefer .cmd to dodge the
+    # same execution-policy gotcha that affects npm.ps1 (see Install-NodeDeps).
+    $npmDir = Split-Path $npmExe -Parent
+    $npxExe = $null
+    foreach ($cand in @("npx.cmd", "npx.exe", "npx")) {
+        $try = Join-Path $npmDir $cand
+        if (Test-Path $try) { $npxExe = $try; break }
+    }
+    if (-not $npxExe) {
+        $npxCmd = Get-Command npx -ErrorAction SilentlyContinue
+        if ($npxCmd) { $npxExe = $npxCmd.Source }
+    }
+    if (-not $npxExe) {
+        Write-Warn "npx not found -- cannot install Playwright Chromium."
+        Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
+        $script:_StageSkippedReason = "npx not found -- browser_* agent tools will be unavailable until Chromium is installed manually"
+        return
+    }
+
+    $pwLog = "$env:TEMP\hermes-playwright-install-$(Get-Random).log"
+    Push-Location $InstallDir
+    # Capture EAP outside the try block so the catch's restore call always
+    # has a meaningful value (see Install-Uv for the full rationale).
+    $prevEAP = $ErrorActionPreference
+    try {
+        # Playwright Chromium is ~170MB compressed and the download regularly
+        # takes 3-10 minutes on a fresh VM.  Tee the output to console + log
+        # so the user sees download progress in real time instead of staring
+        # at a silent prompt that looks hung.  See _Run-NpmInstall for the
+        # same pattern and the rationale behind 2>&1 before the pipe.
+        Write-Info "(this can take several minutes -- streaming progress below)"
+        # --yes auto-accepts npx's "Need to install playwright@X.Y.Z"
+        # confirmation prompt.  Without it, npx 7+ blocks on stdin waiting
+        # for a y/N answer that never comes when this is invoked through a
+        # pipeline (Tee-Object disconnects stdin from the user's TTY), and
+        # the install hangs indefinitely after printing "Need to install the
+        # following packages: playwright@X.Y.Z".
+        #
+        # Relax EAP around the playwright invocation: playwright emits a
+        # "Chromium downloaded to ..." success banner to stderr after a
+        # successful install.  Under EAP=Stop, the 2>&1 merge wraps those
+        # stderr lines as ErrorRecord objects and throws -- causing this
+        # catch block to fire with a mangled banner as the error message
+        # even though the install actually succeeded.  Check $LASTEXITCODE
+        # instead, which is the reliable signal.
+        #
+        # The ForEach-Object { "$_" } coercion BEFORE Tee-Object is a
+        # cosmetic polish: with bare 2>&1, PowerShell still renders stderr
+        # lines through its NativeCommandError formatter (the red
+        # "npx.cmd : ..." block).  Coercing each pipeline item to a string
+        # strips that wrapper so the user sees clean playwright output
+        # instead of the alarming-looking error formatting.
+        $ErrorActionPreference = "Continue"
+        & $npxExe --yes playwright install chromium 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $pwLog
+        $pwCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($pwCode -eq 0) {
+            Write-Success "Playwright Chromium installed (browser tools ready)"
+            Remove-Item -Force $pwLog -ErrorAction SilentlyContinue
+        } else {
+            Write-Warn "Playwright Chromium install failed -- exit code $pwCode"
+            Write-Warn "Browser tools will not work until Chromium is installed."
+            if (Test-Path $pwLog) {
+                $pwErr = Get-Content $pwLog -Raw -ErrorAction SilentlyContinue
+                if ($pwErr) {
+                    $snippet = if ($pwErr.Length -gt 1200) { $pwErr.Substring(0, 1200) + "..." } else { $pwErr }
+                    Write-Info "  playwright output:"
+                    foreach ($line in $snippet -split "`n") {
+                        Write-Host "    $line" -ForegroundColor DarkGray
+                    }
+                    Write-Info "  Full log: $pwLog"
+                }
+            }
+            Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
+            $script:_StageSkippedReason = "Playwright Chromium install failed (exit $pwCode) -- browser_* agent tools will be unavailable until installed manually"
+        }
+    } catch {
+        if ($prevEAP) { $ErrorActionPreference = $prevEAP }
+        Write-Warn "Playwright Chromium install could not be launched: $_"
+        Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
+        $script:_StageSkippedReason = "Playwright Chromium install could not be launched: $_"
+    } finally {
+        Pop-Location
     }
 }
 
@@ -3497,7 +3610,8 @@ function Write-Completion {
 #         "name": "uv",
 #         "title": "Installing uv package manager",
 #         "category": "prereqs",
-#         "needs_user_input": false
+#         "needs_user_input": false,
+#         "optional": false
 #       },
 #       ...
 #     ]
@@ -3541,11 +3655,22 @@ $InstallStages = @(
     @{ Name = "python";           Title = "Verifying Python $PythonVersion";      Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Python" }
     @{ Name = "git";              Title = "Installing Git";                       Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Git" }
     @{ Name = "node";             Title = "Detecting Node.js";                    Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Node" }
-    @{ Name = "system-packages";  Title = "Installing ripgrep and ffmpeg";        Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-SystemPackages" }
+    # Optional = $true: ripgrep (fast file search) and ffmpeg (TTS voice
+    # messages) are conveniences, not core functionality -- nothing else
+    # should be blocked by winget being slow/flaky. Same treatment as
+    # browser-engine below.
+    @{ Name = "system-packages";  Title = "Installing ripgrep and ffmpeg";        Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-SystemPackages"; Optional = $true }
     @{ Name = "repository";       Title = "Cloning Hermes repository";            Category = "install";      NeedsUserInput = $false; Worker = "Stage-Repository" }
     @{ Name = "venv";             Title = "Creating Python virtual environment";  Category = "install";      NeedsUserInput = $false; Worker = "Stage-Venv" }
     @{ Name = "dependencies";     Title = "Installing Python dependencies";       Category = "install";      NeedsUserInput = $false; Worker = "Stage-Dependencies" }
     @{ Name = "node-deps";        Title = "Installing Node.js dependencies";      Category = "install";      NeedsUserInput = $false; Worker = "Stage-NodeDeps" }
+    # Optional = $true: a driver (bootstrap-runner.cjs) must treat this
+    # stage's failure -- including a hard timeout-kill, which no in-script
+    # error handling can catch -- as a warning, not a reason to abort the
+    # whole install. Chromium is the single largest, slowest, most
+    # failure-prone piece of setup; nothing else should depend on it
+    # succeeding.
+    @{ Name = "browser-engine";   Title = "Installing browser engine (Chromium)"; Category = "install";      NeedsUserInput = $false; Worker = "Stage-BrowserEngine"; Optional = $true }
 )
 if ($IncludeDesktop) {
     # Insert AFTER node-deps so workspace npm is already installed when
@@ -3594,6 +3719,7 @@ function Stage-Repository       { Install-Repository }
 function Stage-Venv             { Resolve-UvCmd; Install-Venv }
 function Stage-Dependencies     { Resolve-UvCmd; Install-Dependencies }
 function Stage-NodeDeps         { Install-NodeDeps }
+function Stage-BrowserEngine    { Install-BrowserEngine }
 function Stage-Desktop          { Install-Desktop }
 function Stage-Path             { Set-PathVariable }
 function Stage-ConfigTemplates  { Copy-ConfigTemplates }
@@ -3832,6 +3958,10 @@ try {
                     title            = $_.Title
                     category         = $_.Category
                     needs_user_input = $_.NeedsUserInput
+                    # $_.Optional is $null (falsy) for every stage that
+                    # doesn't set it, so this defaults to false without
+                    # needing every existing stage definition touched.
+                    optional         = [bool]$_.Optional
                 }
             })
         }

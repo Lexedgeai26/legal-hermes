@@ -51,6 +51,72 @@ function hiddenWindowsChildOptions(options = {}) {
 
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 
+// If a spawned install-script child produces no stdout/stderr output for this
+// long, treat it as stalled and kill it. Every real stage (npm install, npx
+// playwright install, uv python/venv/deps) streams periodic progress lines;
+// total silence this long means the underlying network call is stuck --
+// commonly a firewall, proxy, VPN, or antivirus silently dropping/inspecting
+// the connection with no timeout of its own -- not that work is happening.
+// Without this, a stalled child hangs the installer indefinitely, and the
+// ONLY way out was Task Manager or a reboot: see killProcessTree below for
+// why even a "Cancel install" button doesn't otherwise help.
+const STAGE_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+const IDLE_CHECK_INTERVAL_MS = 15 * 1000
+
+// Stages with a known long, silent (no-stdout) phase get a longer idle
+// allowance than the 5-minute default. Concretely: `node-deps` runs `npx
+// playwright install chromium`, which prints a download progress bar but
+// then goes completely silent while it extracts ~280MB / hundreds of files
+// -- normally seconds, but on a machine with real-time antivirus scanning
+// every extracted file that silent window alone can run past 5 minutes even
+// though the install is genuinely still working. Keep the tight default
+// everywhere else so a truly dead process on another stage still fails fast.
+const STAGE_IDLE_TIMEOUT_OVERRIDES_MS = {
+  'node-deps': 15 * 60 * 1000,
+  'browser-engine': 15 * 60 * 1000
+}
+
+// Force-terminate a spawned install-script child AND every process it
+// started (npm.cmd -> cmd.exe -> node.exe -> any native build or download
+// child), not just the immediate process.
+//
+// On Windows, `ChildProcess#kill('SIGTERM')` maps to TerminateProcess on the
+// single process handed back by `spawn()` -- it does NOT touch descendants.
+// A stalled `npm install` / `npx playwright install chromium` keeps running
+// as an orphan after that call returns, still holding the network/disk work
+// that caused the hang, which is why clicking "Cancel install" previously
+// looked like it did nothing. `taskkill /T` walks the same parent-child
+// chain install.ps1 itself already uses (its own `taskkill /F /T /IM
+// hermes.exe` cleanup) to reach every descendant.
+//
+// On POSIX the child is spawned detached (its own process group), so
+// signalling the negative pid reaches every descendant it started.
+function killProcessTree(pid) {
+  if (!pid) {
+    return Promise.resolve()
+  }
+
+  if (IS_WINDOWS) {
+    return new Promise(resolve => {
+      const tk = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+      tk.on('close', () => resolve())
+      tk.on('error', () => resolve())
+    })
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      void 0
+    }
+  }
+
+  return Promise.resolve()
+}
+
 // Stages flagged needs_user_input=true in the manifest are skipped by the
 // runner (passed -NonInteractive to install.ps1, which the install script
 // itself handles by emitting skipped=true frames). The renderer / 1E onboarding
@@ -321,7 +387,11 @@ function resolveWindowsPowerShell() {
   return 'powershell.exe'
 }
 
-function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, hermesHome } = {}) {
+function spawnPowerShell(
+  scriptPath,
+  args,
+  { emit, stageName, abortSignal, hermesHome, idleTimeoutMs = STAGE_IDLE_TIMEOUT_MS } = {}
+) {
   return new Promise((resolve, reject) => {
     const ps = process.platform === 'win32' ? resolveWindowsPowerShell() : 'pwsh'
     const fullArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args]
@@ -339,14 +409,12 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
     let stdout = ''
     let stderr = ''
     let killed = false
+    let timedOut = false
+    let lastActivityAt = Date.now()
 
     const onAbort = () => {
       killed = true
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        void 0
-      }
+      void killProcessTree(child.pid)
     }
     if (abortSignal) {
       if (abortSignal.aborted) {
@@ -356,12 +424,29 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
       }
     }
 
+    const idleCheck = setInterval(() => {
+      if (Date.now() - lastActivityAt < idleTimeoutMs) {
+        return
+      }
+
+      timedOut = true
+      emit &&
+        emit({
+          type: 'log',
+          stage: stageName,
+          line: `[bootstrap] no output for ${Math.round(idleTimeoutMs / 60000)} minutes -- terminating stalled process`,
+          stream: 'stderr'
+        })
+      void killProcessTree(child.pid)
+    }, Math.min(IDLE_CHECK_INTERVAL_MS, Math.max(idleTimeoutMs / 4, 50)))
+
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
 
     // Stream stdout line-by-line so the renderer sees progress in real time.
     let stdoutBuf = ''
     child.stdout.on('data', chunk => {
+      lastActivityAt = Date.now()
       stdout += chunk
       stdoutBuf += chunk
       let nl
@@ -374,6 +459,7 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
 
     let stderrBuf = ''
     child.stderr.on('data', chunk => {
+      lastActivityAt = Date.now()
       stderr += chunk
       stderrBuf += chunk
       let nl
@@ -385,24 +471,33 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
     })
 
     child.on('error', err => {
+      clearInterval(idleCheck)
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       reject(err)
     })
 
     child.on('close', (code, signal) => {
+      clearInterval(idleCheck)
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       // Flush any trailing bytes
       if (stdoutBuf) emit && emit({ type: 'log', stage: stageName, line: stdoutBuf, stream: 'stdout' })
       if (stderrBuf) emit && emit({ type: 'log', stage: stageName, line: stderrBuf, stream: 'stderr' })
-      resolve({ stdout, stderr, code, signal, killed })
+      resolve({ stdout, stderr, code, signal, killed, timedOut })
     })
   })
 }
 
-function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome } = {}) {
+function spawnBash(
+  scriptPath,
+  args,
+  { emit, stageName, abortSignal, hermesHome, idleTimeoutMs = STAGE_IDLE_TIMEOUT_MS } = {}
+) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [scriptPath, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      // New process group so killProcessTree can signal the whole tree
+      // (npm/npx/uv children this script starts), not just bash itself.
+      detached: true,
       env: {
         ...process.env,
         HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
@@ -412,14 +507,12 @@ function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome 
     let stdout = ''
     let stderr = ''
     let killed = false
+    let timedOut = false
+    let lastActivityAt = Date.now()
 
     const onAbort = () => {
       killed = true
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        void 0
-      }
+      void killProcessTree(child.pid)
     }
     if (abortSignal) {
       if (abortSignal.aborted) {
@@ -429,11 +522,28 @@ function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome 
       }
     }
 
+    const idleCheck = setInterval(() => {
+      if (Date.now() - lastActivityAt < idleTimeoutMs) {
+        return
+      }
+
+      timedOut = true
+      emit &&
+        emit({
+          type: 'log',
+          stage: stageName,
+          line: `[bootstrap] no output for ${Math.round(idleTimeoutMs / 60000)} minutes -- terminating stalled process`,
+          stream: 'stderr'
+        })
+      void killProcessTree(child.pid)
+    }, Math.min(IDLE_CHECK_INTERVAL_MS, Math.max(idleTimeoutMs / 4, 50)))
+
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
 
     let stdoutBuf = ''
     child.stdout.on('data', chunk => {
+      lastActivityAt = Date.now()
       stdout += chunk
       stdoutBuf += chunk
       let nl
@@ -446,6 +556,7 @@ function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome 
 
     let stderrBuf = ''
     child.stderr.on('data', chunk => {
+      lastActivityAt = Date.now()
       stderr += chunk
       stderrBuf += chunk
       let nl
@@ -457,15 +568,17 @@ function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome 
     })
 
     child.on('error', err => {
+      clearInterval(idleCheck)
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       reject(err)
     })
 
     child.on('close', (code, signal) => {
+      clearInterval(idleCheck)
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       if (stdoutBuf) emit && emit({ type: 'log', stage: stageName, line: stdoutBuf, stream: 'stdout' })
       if (stderrBuf) emit && emit({ type: 'log', stage: stageName, line: stderrBuf, stream: 'stderr' })
-      resolve({ stdout, stderr, code, signal, killed })
+      resolve({ stdout, stderr, code, signal, killed, timedOut })
     })
   })
 }
@@ -573,14 +686,32 @@ async function runStage({ scriptPath, installerKind, stage, emit, hermesHome, ac
         ...buildPosixPinArgs({ installStamp, activeRoot, hermesHome })
       ]
     : ['-Stage', stage.name, '-NonInteractive', '-Json', ...buildPinArgs(installStamp)]
+  const idleTimeoutMs = STAGE_IDLE_TIMEOUT_OVERRIDES_MS[stage.name] ?? STAGE_IDLE_TIMEOUT_MS
   const result = await (isPosix ? spawnBash : spawnPowerShell)(scriptPath, args, {
     emit,
     stageName: stage.name,
     abortSignal,
-    hermesHome
+    hermesHome,
+    idleTimeoutMs
   })
 
   const durationMs = Date.now() - startedAt
+
+  if (result.timedOut) {
+    const ev = {
+      type: 'stage',
+      name: stage.name,
+      state: 'failed',
+      durationMs,
+      error:
+        `No output for ${Math.round(idleTimeoutMs / 60000)} minutes -- the install appears stuck ` +
+        '(most often a firewall, proxy, VPN, or antivirus silently blocking or inspecting the connection ' +
+        'to the package registry). The stalled process was terminated so you are not stuck waiting ' +
+        'indefinitely. Check your network/proxy settings, or try again from a different network, then retry.'
+    }
+    emit(ev)
+    return ev
+  }
 
   if (result.killed) {
     const ev = { type: 'stage', name: stage.name, state: 'failed', durationMs, error: 'cancelled by user' }
@@ -734,6 +865,25 @@ async function runBootstrap(opts) {
         installStamp
       })
       if (ev.state === 'failed') {
+        // Stages install.ps1 marks `optional` in the manifest (browser-engine
+        // /Chromium and system-packages/winget -- the largest, slowest, most
+        // failure-prone parts of setup) must not be able to block the rest of
+        // the install, including when the failure is a hard timeout-kill from
+        // spawnPowerShell/spawnBash's idle-timeout -- no amount of in-script
+        // error handling in install.ps1 can catch that case, so the "don't
+        // abort" decision has to live here instead. The stage itself still
+        // shows as failed in the per-stage UI list (accurate: it DID fail) --
+        // only the overall bootstrap keeps going.
+        if (stage.optional) {
+          emit({
+            type: 'log',
+            stage: stage.name,
+            line: `[bootstrap] optional stage '${stage.name}' failed (${ev.error || 'unknown error'}) -- continuing without it`,
+            stream: 'stderr'
+          })
+          continue
+        }
+
         emit({ type: 'failed', stage: stage.name, error: ev.error || 'stage failed' })
         return { ok: false, failedStage: stage.name, error: ev.error }
       }
@@ -769,5 +919,7 @@ module.exports = {
   packagedInstallScript,
   packagedSourceArchive,
   packagedOfflineBundle,
-  cachedScriptPath
+  cachedScriptPath,
+  killProcessTree,
+  spawnPowerShell
 }
