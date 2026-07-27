@@ -14,10 +14,12 @@ source: https://github.com/CyberSamuraiX/hermes-n8n-mcp
 transport:
   type: stdio
   # For git-installed servers, ${INSTALL_DIR} is substituted at install time
-  # with the path the catalog cloned the repo into. The catalog never
-  # auto-updates: the user re-runs `hermes mcp install official/n8n` to
-  # refresh.
-  command: "${INSTALL_DIR}/.venv/bin/python"
+  # with the path the catalog cloned the repo into. ${VENV_PYTHON} resolves
+  # to that install's own bootstrapped .venv interpreter -- resolved per-OS
+  # (POSIX: .venv/bin/python, Windows: .venv/Scripts/python.exe) since venv's
+  # layout isn't the same on both. The catalog never auto-updates: the user
+  # re-runs `hermes mcp install official/n8n` to refresh.
+  command: "${VENV_PYTHON}"
   args:
     - "${INSTALL_DIR}/server.py"
 
@@ -30,9 +32,15 @@ install:
   # Pin to a commit/tag. Required — manifests do not float HEAD.
   ref: main
   # Bootstrap commands run inside the cloned directory after clone.
+  # ${PYTHON} is the interpreter running Hermes itself (sys.executable), not
+  # a literal `python3` -- stock Windows has no `python3` (only `python`;
+  # `python3.exe` resolves to the 0-byte Microsoft Store stub, which runs and
+  # fails rather than erroring "not found"), so a hardcoded `python3 -m venv`
+  # bootstrap step is a guaranteed failure there. ${VENV_PYTHON} for the pip
+  # step for the same bin/ vs Scripts/ reason as transport.command above.
   bootstrap:
-    - "python3 -m venv .venv"
-    - ".venv/bin/pip install -r requirements.txt"
+    - "${PYTHON} -m venv .venv"
+    - "${VENV_PYTHON} -m pip install -r requirements.txt"
 
 # Authentication. Three shapes:
 #   type: api_key  — prompt for env vars, write to ~/.hermes/.env

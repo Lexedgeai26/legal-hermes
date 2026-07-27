@@ -812,3 +812,192 @@ class TestShippedCatalog:
             assert entry.name
             assert entry.description
             assert entry.transport.type in ("stdio", "http")
+
+
+# ---------------------------------------------------------------------------
+# ${PYTHON} / ${VENV_PYTHON} placeholders
+#
+# Regression coverage for a Windows-breaking bug: the n8n catalog entry (the
+# only shipped manifest with a git+venv install step) hardcoded `python3` in
+# its bootstrap commands and `.venv/bin/python` in its transport.command.
+# Stock Windows has no working `python3` (only `python`; `python3.exe`
+# resolves to the 0-byte Microsoft Store app-execution-alias stub, which
+# *runs* and fails rather than erroring "not found") and venv lays out its
+# interpreter at `.venv\Scripts\python.exe` there, not `.venv/bin/python` --
+# so `hermes mcp install n8n` failed outright on every Windows install.
+# ---------------------------------------------------------------------------
+
+
+class TestPythonPlaceholders:
+    def test_venv_python_path_is_os_correct(self, tmp_path):
+        from hermes_cli import mcp_catalog
+
+        install_dir = tmp_path / "install"
+        venv_py = mcp_catalog._venv_python_path(install_dir)
+        if mcp_catalog.os.name == "nt":
+            assert venv_py == install_dir / ".venv" / "Scripts" / "python.exe"
+        else:
+            assert venv_py == install_dir / ".venv" / "bin" / "python"
+
+    def test_expand_placeholders_python_resolves_to_sys_executable(self, tmp_path):
+        from hermes_cli import mcp_catalog
+
+        result = mcp_catalog._expand_placeholders("${PYTHON} -m venv .venv", None)
+        assert mcp_catalog.sys.executable in result
+        assert "python3" not in result
+
+    def test_expand_placeholders_venv_python_resolves_per_os(self, tmp_path):
+        from hermes_cli import mcp_catalog
+
+        install_dir = tmp_path / "install"
+        result = mcp_catalog._expand_placeholders(
+            "${VENV_PYTHON} -m pip install -r requirements.txt", install_dir
+        )
+        assert str(mcp_catalog._venv_python_path(install_dir)) in result
+
+    def test_expand_placeholders_venv_python_without_install_dir_raises(self):
+        from hermes_cli.mcp_catalog import CatalogError, _expand_placeholders
+
+        with pytest.raises(CatalogError, match=r"\$\{VENV_PYTHON\}"):
+            _expand_placeholders("${VENV_PYTHON}", None)
+
+    def test_expand_placeholders_quotes_paths_with_spaces_for_shell(self, tmp_path):
+        """quote=True (used for bootstrap/shell commands) must wrap a
+        substituted path in quotes when it contains a space -- e.g. a Windows
+        username directory -- so the shell doesn't split it into two tokens.
+        Unquoted (the default, used for transport.command/args which spawn
+        directly as an argv list, not through a shell) must NOT add quotes --
+        literal quote characters there would become part of the executable
+        path handed to subprocess and break it.
+        """
+        from hermes_cli import mcp_catalog
+
+        install_dir = tmp_path / "install dir with spaces"
+        install_dir.mkdir()
+
+        quoted = mcp_catalog._expand_placeholders(
+            "${VENV_PYTHON} -m pip install -r requirements.txt", install_dir, quote=True
+        )
+        assert f'"{mcp_catalog._venv_python_path(install_dir)}"' in quoted
+
+        unquoted = mcp_catalog._expand_placeholders("${VENV_PYTHON}", install_dir)
+        assert unquoted == str(mcp_catalog._venv_python_path(install_dir))
+        assert '"' not in unquoted
+
+    def test_git_install_bootstrap_expands_python_placeholders(self, catalog_dir, monkeypatch, tmp_path):
+        """_do_git_install must expand ${PYTHON}/${VENV_PYTHON} in bootstrap
+        commands before running them -- the actual fix for the n8n bug."""
+        body = _basic_manifest(
+            install={
+                "type": "git",
+                "url": "https://example.com/x.git",
+                "ref": "main",
+                "bootstrap": [
+                    "${PYTHON} -m venv .venv",
+                    "${VENV_PYTHON} -m pip install -r requirements.txt",
+                ],
+            },
+            transport={"type": "stdio", "command": "${VENV_PYTHON}", "args": []},
+        )
+        _write_manifest(catalog_dir, "demo", body)
+
+        from hermes_cli import mcp_catalog
+        from hermes_cli.mcp_catalog import _do_git_install, get_entry
+
+        ran_shell_commands = []
+
+        class _FakeProc:
+            returncode = 0
+
+        def fake_run(cmd, *args, **kwargs):
+            if kwargs.get("shell"):
+                ran_shell_commands.append(cmd)
+            return _FakeProc()
+
+        monkeypatch.setattr(mcp_catalog.subprocess, "run", fake_run)
+        monkeypatch.setattr(mcp_catalog.shutil, "which", lambda x: "/usr/bin/git")
+
+        entry = get_entry("demo")
+        install_dir = _do_git_install(entry)
+
+        assert len(ran_shell_commands) == 2
+        assert "python3" not in ran_shell_commands[0]
+        assert mcp_catalog.sys.executable in ran_shell_commands[0]
+        assert str(mcp_catalog._venv_python_path(install_dir)) in ran_shell_commands[1]
+
+    def test_install_with_venv_python_substitution_in_transport(self, catalog_dir, tmp_path):
+        """Mirrors test_install_with_install_dir_substitution but for
+        ${VENV_PYTHON} -- the transport.command a real MCP client will spawn
+        must end up pointing at the OS-correct venv interpreter path."""
+        body = _basic_manifest(
+            install={"type": "git", "url": "https://example.com/demo.git", "ref": "main", "bootstrap": []},
+            transport={"type": "stdio", "command": "${VENV_PYTHON}", "args": ["${INSTALL_DIR}/server.py"]},
+        )
+        _write_manifest(catalog_dir, "demo", body)
+
+        fake_clone = tmp_path / "fake-clone"
+        fake_clone.mkdir()
+
+        from hermes_cli import mcp_catalog
+        from hermes_cli.mcp_catalog import install_entry
+        from hermes_cli.config import load_config
+
+        with patch.object(mcp_catalog, "_do_git_install", return_value=fake_clone):
+            install_entry(_entry("demo"), enable=True)
+
+        servers = load_config()["mcp_servers"]
+        assert servers["demo"]["command"] == str(mcp_catalog._venv_python_path(fake_clone))
+        assert servers["demo"]["args"] == [f"{fake_clone}/server.py"]
+
+
+class TestN8nManifestDoesNotHardcodePosixPython:
+    """Guards the real shipped optional-mcps/n8n/manifest.yaml specifically
+    (not a synthetic fixture) against regressing to the hardcoded
+    `python3` / `.venv/bin/python` that broke it on Windows."""
+
+    def test_real_n8n_manifest_uses_python_placeholders(self):
+        """Inspect the parsed manifest's actual command/bootstrap fields, not
+        the raw file text -- explanatory comments in the manifest are allowed
+        to mention `python3` in prose without tripping this check."""
+        from hermes_cli.mcp_catalog import get_entry
+
+        entry = get_entry("n8n")
+        assert entry is not None, "n8n catalog entry should load from optional-mcps/"
+        assert entry.install is not None
+
+        transport_fields = [entry.transport.command or ""] + list(entry.transport.args)
+        bootstrap_fields = list(entry.install.bootstrap)
+        all_fields = transport_fields + bootstrap_fields
+
+        assert any("${VENV_PYTHON}" in f for f in transport_fields + bootstrap_fields), (
+            "n8n manifest must launch/bootstrap via ${VENV_PYTHON}, not a "
+            "hardcoded POSIX .venv/bin path (broken on Windows, where venv "
+            "uses .venv\\Scripts\\)"
+        )
+        assert any("${PYTHON}" in f for f in bootstrap_fields), (
+            "n8n manifest's bootstrap must create its venv via ${PYTHON}, not "
+            "a literal `python3` (stock Windows has no working python3 -- "
+            "python3.exe there is the 0-byte Microsoft Store stub)"
+        )
+        assert not any("python3" in f for f in all_fields), (
+            "found a literal 'python3' in the n8n manifest's command/bootstrap "
+            "fields -- this breaks the bootstrap step on stock Windows"
+        )
+        assert not any(".venv/bin" in f or ".venv\\bin" in f for f in all_fields), (
+            "found a hardcoded POSIX venv path in the n8n manifest's "
+            "command/bootstrap fields -- this breaks transport.command on Windows"
+        )
+
+    def test_real_n8n_manifest_still_parses_and_installs(self, monkeypatch):
+        """End-to-end (mocked I/O only): the real manifest parses, and its
+        git-install + transport resolve to the OS-correct venv interpreter."""
+        from hermes_cli import mcp_catalog
+
+        monkeypatch.setenv("HERMES_OPTIONAL_MCPS", "")
+        entry = mcp_catalog.get_entry("n8n")
+        assert entry is not None, "n8n entry should load from the real optional-mcps/ dir"
+        assert entry.install is not None and entry.install.type == "git"
+
+        fake_install_dir = Path("/tmp/fake-n8n-install") if mcp_catalog.os.name != "nt" else Path("C:/fake-n8n-install")
+        cfg = mcp_catalog._build_server_config(entry, fake_install_dir)
+        assert cfg["command"] == str(mcp_catalog._venv_python_path(fake_install_dir))

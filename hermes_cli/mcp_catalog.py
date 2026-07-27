@@ -23,9 +23,11 @@ See references/mcp-catalog.md (this repo's skill) for the manifest schema.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,8 +46,21 @@ from hermes_cli.cli_output import prompt as _prompt_input
 
 _MANIFEST_VERSION = 1
 
-# Substituted at install time inside `transport.command` / `transport.args`.
+# Substituted at install time inside `transport.command` / `transport.args`
+# and in git-install `bootstrap` commands.
 _INSTALL_DIR_VAR = "${INSTALL_DIR}"
+# The interpreter running Hermes itself. Manifests use this instead of a
+# hardcoded `python3` for bootstrap commands (e.g. `${PYTHON} -m venv .venv`)
+# -- `python3` doesn't exist on stock Windows (only `python`; `python3.exe`
+# resolves to the 0-byte Microsoft Store app-execution-alias stub, which runs
+# and fails rather than erroring "not found"). sys.executable is guaranteed
+# to be a real, working interpreter on every platform Hermes itself runs on.
+_PYTHON_VAR = "${PYTHON}"
+# The interpreter (or pip, via `-m pip`) inside a git-installed MCP's own
+# bootstrapped .venv. venv's layout differs by OS -- POSIX: .venv/bin/python,
+# Windows: .venv/Scripts/python.exe -- so a manifest can't hardcode one path
+# and work on both. Requires an install block (there's no venv without one).
+_VENV_PYTHON_VAR = "${VENV_PYTHON}"
 
 
 # ─── Data classes ────────────────────────────────────────────────────────────
@@ -418,19 +433,62 @@ def _do_git_install(entry: CatalogEntry) -> Path:
             raise CatalogError(f"git checkout {install.ref} failed")
 
     if install.bootstrap:
-        _run_bootstrap(dest, install.bootstrap)
+        # Expand ${PYTHON}/${VENV_PYTHON}/${INSTALL_DIR} in each bootstrap
+        # command before running -- lets a single manifest write e.g.
+        # `${PYTHON} -m venv .venv` and have it resolve correctly whether
+        # Hermes itself is running on Windows or POSIX. quote=True because
+        # these run through a shell (see _run_bootstrap): an interpreter path
+        # containing a space (e.g. a Windows username with a space in it)
+        # would otherwise split into two shell tokens.
+        expanded = [_expand_placeholders(cmd, dest, quote=True) for cmd in install.bootstrap]
+        _run_bootstrap(dest, expanded)
 
     return dest
 
 
-def _expand_install_dir(value: str, install_dir: Optional[Path]) -> str:
-    if _INSTALL_DIR_VAR not in value:
-        return value
-    if install_dir is None:
-        raise CatalogError(
-            f"manifest references {_INSTALL_DIR_VAR} but no install block exists"
-        )
-    return value.replace(_INSTALL_DIR_VAR, str(install_dir))
+def _venv_python_path(install_dir: Path) -> Path:
+    """Path to the interpreter inside ``<install_dir>/.venv``, correct per OS.
+
+    venv lays out the interpreter differently on Windows (``Scripts\\python.exe``)
+    vs POSIX (``bin/python``).
+    """
+    if os.name == "nt":
+        return install_dir / ".venv" / "Scripts" / "python.exe"
+    return install_dir / ".venv" / "bin" / "python"
+
+
+def _expand_placeholders(value: str, install_dir: Optional[Path], *, quote: bool = False) -> str:
+    """Substitute ``${PYTHON}``, ``${VENV_PYTHON}``, ``${INSTALL_DIR}`` in *value*.
+
+    ``quote=True`` wraps each substituted path in double quotes when it
+    contains whitespace -- required for bootstrap commands, which run through
+    a shell (see ``_run_bootstrap``) where an unquoted space in e.g. a
+    Windows username directory would split the path into two tokens.
+    ``transport.command``/``args`` are spawned directly as an argv list (no
+    shell), so quoting there would instead be wrong -- the literal quote
+    characters would end up as part of the executable path.
+    """
+
+    def sub(text: str, var: str, replacement: str) -> str:
+        if quote and " " in replacement:
+            replacement = f'"{replacement}"'
+        return text.replace(var, replacement)
+
+    if _PYTHON_VAR in value:
+        value = sub(value, _PYTHON_VAR, sys.executable)
+    if _VENV_PYTHON_VAR in value:
+        if install_dir is None:
+            raise CatalogError(
+                f"manifest references {_VENV_PYTHON_VAR} but no install block exists"
+            )
+        value = sub(value, _VENV_PYTHON_VAR, str(_venv_python_path(install_dir)))
+    if _INSTALL_DIR_VAR in value:
+        if install_dir is None:
+            raise CatalogError(
+                f"manifest references {_INSTALL_DIR_VAR} but no install block exists"
+            )
+        value = sub(value, _INSTALL_DIR_VAR, str(install_dir))
+    return value
 
 
 def _prompt_env_vars(specs: List[EnvVarSpec]) -> Dict[str, str]:
@@ -465,9 +523,9 @@ def _build_server_config(
     cfg: dict = {}
     t = entry.transport
     if t.type == "stdio":
-        cfg["command"] = _expand_install_dir(t.command or "", install_dir)
+        cfg["command"] = _expand_placeholders(t.command or "", install_dir)
         if t.args:
-            cfg["args"] = [_expand_install_dir(a, install_dir) for a in t.args]
+            cfg["args"] = [_expand_placeholders(a, install_dir) for a in t.args]
     elif t.type == "http":
         cfg["url"] = t.url
         if entry.auth.type == "oauth":
