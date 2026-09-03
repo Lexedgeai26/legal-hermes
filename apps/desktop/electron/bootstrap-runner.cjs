@@ -617,6 +617,13 @@ function buildPosixPinArgs({ installStamp, activeRoot, hermesHome }) {
   if (installStamp && installStamp.commit) {
     args.push('--commit', installStamp.commit)
   }
+  // macOS/Linux packages carry the same sanitized source archive as Windows.
+  // Passing it to install.sh is essential for custom builds whose stamped
+  // commit does not exist in the upstream Nous repository.
+  const sourceArchive = packagedSourceArchive()
+  if (sourceArchive) {
+    args.push('--source-archive', sourceArchive)
+  }
   return args
 }
 

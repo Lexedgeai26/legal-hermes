@@ -73,6 +73,7 @@ SKIP_BROWSER=false
 NO_SKILLS=false
 BRANCH="main"
 INSTALL_COMMIT=""
+SOURCE_ARCHIVE=""
 ENSURE_DEPS=""
 POSTINSTALL_MODE=false
 MANIFEST_MODE=false
@@ -115,6 +116,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --commit|-Commit)
             INSTALL_COMMIT="$2"
+            shift 2
+            ;;
+        --source-archive|-SourceArchive)
+            SOURCE_ARCHIVE="$2"
             shift 2
             ;;
         --manifest|-Manifest)
@@ -1118,6 +1123,8 @@ show_manual_install_hint() {
 clone_repo() {
     log_info "Installing to $INSTALL_DIR..."
 
+    local used_source_archive=false
+
     # An interrupted previous clone leaves a .git with no initial commit, where
     # the update path's `git stash` / `git checkout` abort with "You do not
     # have the initial commit yet" and fail the install (#40998). Move such a
@@ -1202,6 +1209,65 @@ clone_repo() {
             log_info "Remove it or choose a different directory with --dir"
             exit 1
         fi
+    elif [ -n "$SOURCE_ARCHIVE" ]; then
+        if [ ! -f "$SOURCE_ARCHIVE" ]; then
+            log_error "Source archive not found: $SOURCE_ARCHIVE"
+            exit 1
+        fi
+
+        log_info "Installing repository from bundled source archive..."
+        local extract_dir
+        extract_dir="$(mktemp -d "${TMPDIR:-/tmp}/hermes-source.XXXXXX")"
+
+        # Validate every archive member before extraction. The archive is
+        # produced by the desktop build, but keeping this path traversal-safe
+        # avoids turning a replaced/corrupt bundle into an arbitrary write.
+        if ! python3 - "$SOURCE_ARCHIVE" "$extract_dir" <<'PY'
+import os
+import sys
+import zipfile
+from pathlib import Path
+
+archive = Path(sys.argv[1])
+destination = Path(sys.argv[2]).resolve()
+with zipfile.ZipFile(archive) as bundle:
+    for member in bundle.infolist():
+        target = (destination / member.filename).resolve()
+        if os.path.commonpath((str(destination), str(target))) != str(destination):
+            raise SystemExit(f"unsafe source archive member: {member.filename}")
+    bundle.extractall(destination)
+PY
+        then
+            rm -rf "$extract_dir"
+            log_error "Bundled source archive could not be extracted"
+            exit 1
+        fi
+
+        local source_root="$extract_dir/hermes-agent"
+        if [ ! -f "$source_root/hermes_cli/main.py" ]; then
+            rm -rf "$extract_dir"
+            log_error "Bundled source archive is missing hermes_cli/main.py"
+            exit 1
+        fi
+
+        mkdir -p "$(dirname "$INSTALL_DIR")"
+        mv "$source_root" "$INSTALL_DIR"
+        rm -rf "$extract_dir"
+
+        # Give the extracted install a real initial commit so later repair or
+        # update runs never mistake it for an interrupted clone. The identity
+        # is command-scoped and does not change the user's Git configuration.
+        git -C "$INSTALL_DIR" init -q -b "$BRANCH"
+        git -C "$INSTALL_DIR" remote add origin "$REPO_URL_HTTPS"
+        git -C "$INSTALL_DIR" add -A
+        git -C "$INSTALL_DIR" \
+            -c user.name="Hermes Desktop Installer" \
+            -c user.email="installer@localhost" \
+            -c core.hooksPath=/dev/null \
+            commit -q -m "Install bundled Hermes source ${INSTALL_COMMIT:-$BRANCH}"
+
+        used_source_archive=true
+        log_success "Bundled source archive extracted"
     else
         # Try SSH first (for private repo access), fall back to HTTPS
         # GIT_SSH_COMMAND disables interactive prompts and sets a short timeout
@@ -1224,7 +1290,7 @@ clone_repo() {
 
     cd "$INSTALL_DIR"
 
-    if [ -n "$INSTALL_COMMIT" ]; then
+    if [ -n "$INSTALL_COMMIT" ] && [ "$used_source_archive" = false ]; then
         log_info "Pinning checkout to commit $INSTALL_COMMIT..."
         if ! git cat-file -e "$INSTALL_COMMIT^{commit}" 2>/dev/null; then
             git fetch origin "$INSTALL_COMMIT" || true
