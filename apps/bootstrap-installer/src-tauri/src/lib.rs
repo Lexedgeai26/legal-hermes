@@ -13,6 +13,7 @@ mod events;
 mod install_script;
 mod powershell;
 mod paths;
+mod private_ai;
 mod update;
 
 use std::sync::Arc;
@@ -180,6 +181,10 @@ pub fn run() {
             paths::get_log_path,
             paths::get_hermes_home,
             paths::open_log_dir,
+            // Private AI model-fit and catalogue intersection. This is pure;
+            // it performs no downloads or configuration writes.
+            private_ai::recommend_private_ai_models,
+            private_ai::validate_private_ai_runtime_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hermes Setup");

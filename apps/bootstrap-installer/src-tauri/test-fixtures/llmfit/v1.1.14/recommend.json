@@ -1,0 +1,37 @@
+{
+  "models": [
+    {
+      "name": "LexEdge Synthetic Legal 9B",
+      "ollama_name": "legal-test:9b",
+      "best_quant": "Q4_K_M",
+      "fit_level": "Good",
+      "memory_required_gb": 10.2,
+      "estimated_tps": 17.4,
+      "run_mode": "GPU",
+      "runtime": "llama.cpp",
+      "effective_context_length": 8192,
+      "disk_size_gb": 5.7,
+      "score_components": {
+        "memory": 0.91,
+        "speed": 0.83
+      }
+    },
+    {
+      "name": "LexEdge Synthetic Legal 3B",
+      "ollama_name": "legal-test:3b",
+      "best_quant": "Q4_K_M",
+      "fit_level": "Excellent",
+      "memory_required_gb": 4.1,
+      "estimated_tps": 31.2,
+      "run_mode": "GPU",
+      "runtime": "llama.cpp",
+      "effective_context_length": 8192,
+      "disk_size_gb": 2.3
+    }
+  ],
+  "system": {
+    "total_ram_gb": 32.0,
+    "gpu_vram_gb": 8.0,
+    "backend": "metal"
+  }
+}

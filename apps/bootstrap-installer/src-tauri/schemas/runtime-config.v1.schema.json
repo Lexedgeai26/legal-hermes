@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexedge.ai/schemas/runtime-config.v1.schema.json",
+  "title": "LexEdge Managed Private AI Runtime Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "managed",
+    "host",
+    "port",
+    "runtimePath",
+    "modelsPath",
+    "generationModel",
+    "embeddingModel"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "managed": { "const": true },
+    "host": { "enum": ["127.0.0.1", "::1", "localhost"] },
+    "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+    "runtimePath": { "type": "string", "minLength": 1 },
+    "modelsPath": { "type": "string", "minLength": 1 },
+    "generationModel": { "type": "string", "minLength": 1 },
+    "embeddingModel": { "type": "string", "minLength": 1 },
+    "catalogueId": { "type": "string", "minLength": 1 },
+    "catalogueVersion": { "type": "string", "minLength": 1 },
+    "installedAt": { "type": "string", "format": "date-time" },
+    "validatedAt": { "type": ["string", "null"], "format": "date-time" }
+  }
+}
