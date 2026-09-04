@@ -40,6 +40,7 @@ import {
   unpinSession
 } from '../store/layout'
 import { respondToApprovalAction } from '../store/native-notifications'
+import { completeDesktopOnboarding } from '../store/onboarding'
 import { $filePreviewTarget, $previewTarget, closeActiveRightRailTab } from '../store/preview'
 import {
   $activeGatewayProfile,
@@ -965,6 +966,11 @@ export function DesktopController() {
         <LawyerOnboardingWizard
           enabled={gatewayState === 'open'}
           onCompleted={() => {
+            // The legal onboarding wizard already validates and saves the
+            // provider/model configuration. Complete the generic desktop
+            // onboarding state too so users are not asked to configure the
+            // same provider a second time.
+            completeDesktopOnboarding()
             void refreshActiveProfile()
             void refreshHermesConfig()
             void refreshCurrentModel()

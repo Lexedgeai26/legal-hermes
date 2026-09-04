@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -472,6 +472,7 @@ export function LawyerOnboardingWizard({
   enabled: boolean
   onCompleted?: () => void
 }) {
+  const onCompletedRef = useRef(onCompleted)
   const [visible, setVisible] = useState(false)
   const [status, setStatus] = useState<OnboardingStatus | null>(null)
   const [practiceCatalog, setPracticeCatalog] = useState<LexEdgePracticeCatalog | null>(null)
@@ -568,6 +569,10 @@ export function LawyerOnboardingWizard({
   ])
 
   useEffect(() => {
+    onCompletedRef.current = onCompleted
+  }, [onCompleted])
+
+  useEffect(() => {
     if (!enabled) {
       return
     }
@@ -583,6 +588,12 @@ export function LawyerOnboardingWizard({
         }
         setStatus(next)
         setVisible(forceOnboarding || !next.completed)
+        if (next.completed && !forceOnboarding) {
+          // Reconcile installations that completed legal onboarding before the
+          // desktop provider picker was linked to this wizard. The controller
+          // uses this callback to mark that duplicate onboarding as complete.
+          onCompletedRef.current?.()
+        }
         if (next.profile_name) {
           setProfileName(next.profile_name === 'default' ? 'lexedge-practice' : next.profile_name)
         }
