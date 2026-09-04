@@ -1,5 +1,5 @@
-# Nous-approved MCP catalog entry.
-# Presence in this directory = approval. Merged via PR review.
+# Bundled MCP catalog entry.
+# Presence in this directory means it passed project review.
 #
 # Schema version 1.
 manifest_version: 1

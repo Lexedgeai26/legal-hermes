@@ -2,6 +2,8 @@
 
 This guide covers local creation of LexEdge AI desktop installers for public or tester distribution.
 
+Canonical repository: https://github.com/Lexedgeai26/legal-hermes
+
 LexEdge AI is built on Hermes Agent, but public LexEdge installers must not bootstrap from an unpublished local commit or from private developer state. The Windows installer is especially sensitive because first launch installs the Python runtime into the user's local Hermes home.
 
 ## What Gets Packaged
@@ -43,10 +45,10 @@ resources/bootstrap/hermes-agent-source.zip
 The bootstrap runner prefers the packaged `install.ps1` and passes `-SourceArchive <path>` to install from `hermes-agent-source.zip`. This avoids a first-launch failure where Windows tries to download:
 
 ```text
-https://raw.githubusercontent.com/NousResearch/hermes-agent/<local-commit>/scripts/install.ps1
+https://raw.githubusercontent.com/Lexedgeai26/legal-hermes/<local-commit>/scripts/install.ps1
 ```
 
-That URL fails when the local commit is not present in the public upstream repo. Do not remove the bundled source archive path unless the build is changed to use a reachable public LexEdge repository and ref.
+That URL fails when the local commit is not present in the public LexEdge repo. Do not remove the bundled source archive path; it keeps a packaged build reproducible even before its commit is pushed.
 
 ## Prerequisites
 

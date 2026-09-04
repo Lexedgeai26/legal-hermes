@@ -19,8 +19,9 @@ import {
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
 import { UninstallSection } from './uninstall-section'
 
-const HERMES_REPO_URL = 'https://github.com/NousResearch/hermes-agent'
+const LEXEDGE_REPO_URL = 'https://github.com/Lexedgeai26/legal-hermes'
 const LEXEDGE_WEBSITE_URL = 'https://www.lexedge.ai/'
+const UPSTREAM_HERMES_REPO_URL = 'https://github.com/NousResearch/hermes-agent'
 
 function relativeTime(ms: number | undefined, a: Translations['settings']['about']) {
   if (!ms) {
@@ -171,6 +172,27 @@ export function AboutSettings() {
         />
 
         <ListRow
+          description="Public source code, documentation, issues, and releases for LexEdge Legal Hermes."
+          hint={LEXEDGE_REPO_URL}
+          title="LexEdge source"
+        />
+
+        <Button asChild className="mt-2" size="sm" variant="text">
+          <a
+            href={LEXEDGE_REPO_URL}
+            onClick={event => {
+              event.preventDefault()
+              void window.hermesDesktop?.openExternal?.(LEXEDGE_REPO_URL)
+            }}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLink className="size-3" />
+            Lexedgeai26/legal-hermes
+          </a>
+        </Button>
+
+        <ListRow
           description={a.automaticUpdatesDesc}
           hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
           title={a.automaticUpdates}
@@ -184,10 +206,10 @@ export function AboutSettings() {
 
         <Button asChild className="mt-2" size="sm" variant="text">
           <a
-            href={HERMES_REPO_URL}
+            href={UPSTREAM_HERMES_REPO_URL}
             onClick={event => {
               event.preventDefault()
-              void window.hermesDesktop?.openExternal?.(HERMES_REPO_URL)
+              void window.hermesDesktop?.openExternal?.(UPSTREAM_HERMES_REPO_URL)
             }}
             rel="noreferrer"
             target="_blank"

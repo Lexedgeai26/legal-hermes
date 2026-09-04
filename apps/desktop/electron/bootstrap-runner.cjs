@@ -202,7 +202,7 @@ function downloadInstallScript(commit, destPath) {
   // is immutable (unlike a branch ref), so we don't need integrity
   // verification beyond "did the file we wrote pass a syntax probe."
   const scriptName = installScriptName()
-  const url = `https://raw.githubusercontent.com/NousResearch/hermes-agent/${commit}/scripts/${scriptName}`
+  const url = `https://raw.githubusercontent.com/Lexedgeai26/legal-hermes/${commit}/scripts/${scriptName}`
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
     const tmpPath = destPath + '.tmp'
@@ -619,7 +619,7 @@ function buildPosixPinArgs({ installStamp, activeRoot, hermesHome }) {
   }
   // macOS/Linux packages carry the same sanitized source archive as Windows.
   // Passing it to install.sh is essential for custom builds whose stamped
-  // commit does not exist in the upstream Nous repository.
+  // commit is not yet reachable in the public LexEdge repository.
   const sourceArchive = packagedSourceArchive()
   if (sourceArchive) {
     args.push('--source-archive', sourceArchive)

@@ -1,5 +1,9 @@
 # Hermes - Legal Agent by LexEdge AI Windows installer runbook
 
+Public source: https://github.com/Lexedgeai26/legal-hermes
+
+This is the release-engineering runbook. End users should follow [Desktop Installation for macOS and Windows](desktop-installation.md).
+
 ## Goal
 
 Ship a Windows installer that feels safe for non-technical legal users:
@@ -35,6 +39,9 @@ npm run dist:win:zip
 Build professional Windows installers on a Windows build machine or Windows CI:
 
 ```powershell
+git clone https://github.com/Lexedgeai26/legal-hermes.git
+cd legal-hermes
+npm install
 cd apps\desktop
 npm run dist:win:nsis
 npm run dist:win:msi

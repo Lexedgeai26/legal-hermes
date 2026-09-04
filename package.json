@@ -24,13 +24,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://www.lexedge.ai/"
+    "url": "git+https://github.com/Lexedgeai26/legal-hermes.git"
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://www.lexedge.ai/"
+    "url": "https://github.com/Lexedgeai26/legal-hermes/issues"
   },
-  "homepage": "https://www.lexedge.ai/",
+  "homepage": "https://lexedge.ai/agent/",
   "dependencies": {
     "@streamdown/math": "^1.0.2",
     "agent-browser": "^0.26.0"

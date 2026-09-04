@@ -2,6 +2,12 @@
 
 Hermes - Legal Agent by LexEdge AI is an open-source legal-focused assistant built on the MIT-licensed Hermes Agent runtime by Nous Research.
 
+- Public repository: https://github.com/Lexedgeai26/legal-hermes
+- Product overview: https://lexedge.ai/agent/
+- End-user download: https://lexedge.ai/download-hermes/
+
+If you want to use the application rather than modify it, follow the [macOS and Windows desktop installation guide](docs/desktop-installation.md). The rest of this document is for source users, contributors, and release engineers.
+
 This guide covers:
 
 - using Hermes - Legal Agent from the CLI
@@ -19,6 +25,13 @@ Recommended development environment:
 - Python 3.11
 - `uv`
 - macOS, Linux, WSL2, or Windows 10/11
+
+Clone the public repository:
+
+```bash
+git clone https://github.com/Lexedgeai26/legal-hermes.git
+cd legal-hermes
+```
 
 Install `uv` if needed:
 
@@ -181,8 +194,8 @@ The ZIP is useful for internal testing. It is not the recommended end-user insta
 Use a Windows 10/11 x64 machine or Windows CI runner.
 
 ```powershell
-git clone <repo-url>
-cd hermes-agent
+git clone https://github.com/Lexedgeai26/legal-hermes.git
+cd legal-hermes
 npm install
 cd apps\desktop
 npm run dist:win:nsis
@@ -240,6 +253,8 @@ Imported legal plugins are organized into existing Hermes legal skill groups whe
 
 ## Use Hermes - Legal Agent for legal work
 
+For repeat work, create a local [Matter Workspace](docs/matter-workspaces.md). To connect self-hosted workflow automation, follow the [n8n integration guide](docs/n8n-guide.md).
+
 Example prompts:
 
 ```text
@@ -280,4 +295,7 @@ Hermes - Legal Agent by LexEdge AI is developed from the original MIT-licensed H
 
 - Upstream: https://github.com/NousResearch/hermes-agent
 - Original project: Nous Research
+- LexEdge source: https://github.com/Lexedgeai26/legal-hermes
 - LexEdge customization: Chirag Kansara, https://www.lexedge.ai/
+
+LexEdge AI is an independent project and is not affiliated with, endorsed by, sponsored by, or partnered with Nous Research, Hermes Agent, or n8n. Their names, marks, and logos belong to their respective owners.

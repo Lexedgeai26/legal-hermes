@@ -1,141 +1,122 @@
-# Hermes Desktop ☤
+# LexEdge AI Desktop
 
-<p align="center">
-  <a href="https://github.com/NousResearch/hermes-agent/releases"><img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-FFD700?style=for-the-badge" alt="Download"></a>
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-</p>
+[![Download](https://img.shields.io/badge/Download-macOS%20%7C%20Windows-087EA4)](https://lexedge.ai/download-hermes/)
+[![Source](https://img.shields.io/badge/Source-Lexedgeai26%2Flegal--hermes-181717?logo=github)](https://github.com/Lexedgeai26/legal-hermes)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](../../LICENSE)
 
-**The native desktop app for [Hermes Agent](../../README.md) — the self-improving AI agent from [Nous Research](https://nousresearch.com).** Same agent, same skills, same memory as the CLI and gateway, in a polished native window — chat with streaming tool output, side-by-side previews, a file browser, voice, and settings, no terminal required. Available for **macOS, Windows, and Linux**.
-
-<table>
-<tr><td><b>Chat with the full agent</b></td><td>Streaming responses, live tool activity, structured tool summaries, and the same conversation history as every other Hermes surface.</td></tr>
-<tr><td><b>Side-by-side previews</b></td><td>Render web pages, files, and tool outputs in a right-hand pane while you keep chatting.</td></tr>
-<tr><td><b>File browser</b></td><td>Explore and preview the working directory without leaving the app.</td></tr>
-<tr><td><b>Voice</b></td><td>Talk to Hermes and hear it back.</td></tr>
-<tr><td><b>Settings & onboarding</b></td><td>Manage providers, models, tools, and credentials from a real UI. First-run setup gets you to your first message in seconds.</td></tr>
-<tr><td><b>Stays current</b></td><td>Built-in updates pull the latest agent and rebuild the app in place.</td></tr>
-</table>
-
----
+LexEdge AI Desktop is the native interface for [LexEdge Legal Hermes](../../README.md). It combines the Hermes agent runtime with legal onboarding, profiles, Matter Workspaces, legal skills, documents, previews, voice, messaging, scheduled work, and optional n8n/MCP automation.
 
 ## Install
 
-### Install with Hermes (recommended)
+Download the macOS or Windows installer from [lexedge.ai/download-hermes](https://lexedge.ai/download-hermes/), then follow the [desktop installation guide](../../docs/desktop-installation.md).
 
-Already have the Hermes CLI? Just run:
+On first launch, the app installs a user-scoped local runtime and shows live progress. It may prepare Python, Git, Node.js, packages, and browser helpers. Keep the app open until all setup stages complete.
 
-```bash
-hermes desktop
+Default runtime locations:
+
+```text
+macOS/Linux: ~/.hermes
+Windows:     %LOCALAPPDATA%\hermes
 ```
 
-It builds and launches the GUI against your existing install — same config, keys, sessions, and skills. On first launch Hermes walks you through picking a provider and model; nothing else to configure.
+The legal onboarding wizard then configures the practice profile, provider/model, and legal skills. A completed legal onboarding also completes provider onboarding so users are not asked for the same provider twice.
 
-### Prebuilt installers
+## Desktop capabilities
 
-Prebuilt installers are built and distributed via [the Hermes Desktop website.](https://hermes-agent.nousresearch.com/).
+| Capability | Description |
+| --- | --- |
+| Agent chat | Streaming responses, tool activity, structured results, and reusable sessions. |
+| Matter Workspaces | Connect an existing local legal folder, index supported documents, and open bounded matter context in chat. |
+| Skills | Enable legal and general-purpose skill groups for repeatable work. |
+| Documents and artifacts | Browse files, preview results, and prepare reviewable outputs. |
+| Profiles | Separate practices, teams, clients, skills, settings, sessions, and memory. |
+| Models | Connect supported cloud APIs, compatible endpoints, or local models. |
+| Automation | Use cron for scheduled work and MCP for approved external tools, including optional n8n workflows. |
+| Messaging | Configure supported channels without exposing raw infrastructure during normal legal work. |
+| Recovery | Retry or repair first-launch setup and inspect redacted local logs. |
 
----
-
-## Updating
-
-The app checks for updates in the background and offers a one-click update when one is ready. You can also update any time from the CLI:
-
-```bash
-hermes update
-```
-
----
-
-## Requirements
-
-The installer handles everything for you (Python 3.11+, a portable Git, ripgrep).
-
----
+See the [Matter Workspace guide](../../docs/matter-workspaces.md) and [n8n integration guide](../../docs/n8n-guide.md).
 
 ## Development
 
-Want to hack on the app itself? Install workspace deps from the repo root once, then run the dev server from this directory:
+Install workspace dependencies from the repository root:
 
 ```bash
-npm install          # from repo root — links apps/desktop, web, apps/shared
+git clone https://github.com/Lexedgeai26/legal-hermes.git
+cd legal-hermes
+npm install
 cd apps/desktop
-npm run dev          # Vite renderer + Electron, which boots the Python backend
+npm run dev
 ```
 
-Point the app at a specific source checkout, or sandbox it away from your real config:
+The development command starts the Vite renderer and Electron shell, then boots the Python backend from the current source checkout.
+
+Point development at a specific checkout or isolated data directory:
 
 ```bash
-HERMES_DESKTOP_HERMES_ROOT=/path/to/clone npm run dev
-HERMES_HOME=/tmp/throwaway npm run dev
-npm run dev:fake-boot   # exercise the startup overlay with deterministic delays
+HERMES_DESKTOP_HERMES_ROOT=/path/to/legal-hermes npm run dev
+HERMES_HOME=/tmp/lexedge-desktop-test npm run dev
+npm run dev:fake-boot
 ```
 
-### Building installers
+Do not run development builds against production client data.
+
+## Build packages
 
 ```bash
-npm run dist:mac     # DMG + zip
-npm run dist:win     # NSIS + MSI
-npm run dist:linux   # AppImage + deb + rpm
-npm run pack         # unpacked app under release/ (no installer)
+npm run build          # renderer and staged resources
+npm run pack           # unpacked current-platform app
+npm run dist:mac       # macOS DMG + ZIP
+npm run dist:win:nsis  # Windows NSIS installer
+npm run dist:win:msi   # optional Windows MSI
+npm run dist:linux     # AppImage + deb + rpm
 ```
 
-Installers are built and uploaded to GitHub Releases manually. macOS/Windows signing & notarization happen automatically when the relevant credentials are present in the environment (`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_*` for macOS, `WIN_CSC_*` for Windows).
+Build Windows installers on Windows CI or a controlled Windows builder for the most reliable signing and installer validation. Public macOS releases should be signed and notarized; public Windows releases should be signed and tested on a clean Windows VM.
 
-### How it works
+The packaged app includes platform bootstrap scripts and a sanitized source archive:
 
-The packaged app ships only the Electron shell. On first launch it installs the Hermes Agent runtime into `HERMES_HOME` (`~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows) — the **same layout a CLI install uses**, so the two are interchangeable. The renderer (React, in `src/`) talks to a `hermes dashboard` backend over the standard gateway APIs and reuses the embedded TUI rather than reimplementing chat. The install, backend-resolution, and self-update logic all live in `electron/main.cjs`.
+```text
+resources/bootstrap/install.sh     # macOS/Linux
+resources/bootstrap/install.ps1    # Windows
+resources/bootstrap/hermes-agent-source.zip
+```
 
-### Verification
+This lets first launch install the exact packaged source without relying on a private or unpublished commit URL.
 
-Run before opening a PR (lint may surface pre-existing warnings but must exit cleanly):
+See [Desktop Installer Builds](../../docs/developer/desktop-installer-builds.md) for release engineering.
+
+## Verification
+
+From `apps/desktop`:
 
 ```bash
-npm run fix
 npm run typecheck
-npm run lint
-npm run test:desktop:all
+npm run test:ui
+npm run test:desktop:platforms
+npm run build
 ```
 
-### Troubleshooting
+Run the full lint suite as part of repository cleanup; it may currently report pre-existing style issues outside a focused change. Do not describe a release as verified unless the required release checks and clean-machine installation test have passed.
 
-Boot logs land in `HERMES_HOME/logs/desktop.log` (includes backend output and recent Python tracebacks) — check it first if the app reports a boot failure.
+## Troubleshooting
 
-**macOS / Linux:**
+Logs:
 
-```bash
-# Force a clean first-launch setup
-rm "$HOME/.hermes/hermes-agent/.hermes-bootstrap-complete"
-# Rebuild a broken Python venv
-rm -rf "$HOME/.hermes/hermes-agent/venv"
-# Reset a stuck macOS microphone prompt (macOS only)
-tccutil reset Microphone com.nousresearch.hermes
+```text
+macOS/Linux: ~/.hermes/logs/desktop.log
+               ~/.hermes/logs/bootstrap-*.log
+
+Windows:     %LOCALAPPDATA%\hermes\logs\desktop.log
+             %LOCALAPPDATA%\hermes\logs\bootstrap-*.log
 ```
 
-**Windows (PowerShell):**
+Use **Retry** for a temporary download failure and **Repair install** when the runtime is incomplete. Repair should retain chats and configuration. A clean reset removes local credentials, sessions, profiles, and runtime state; follow the backup-first instructions in the [desktop installation guide](../../docs/desktop-installation.md#reset-for-a-clean-test).
 
-```powershell
-# Force a clean first-launch setup
-Remove-Item "$env:LOCALAPPDATA\hermes\hermes-agent\.hermes-bootstrap-complete"
-# Rebuild a broken Python venv
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\hermes\hermes-agent\venv"
-```
+Open public bugs at [GitHub Issues](https://github.com/Lexedgeai26/legal-hermes/issues). Never attach `.env`, `auth.json`, databases, client files, or unredacted logs.
 
-> The default Hermes home on Windows is `%LOCALAPPDATA%\hermes`. Set the `HERMES_HOME` env var if you've relocated it.
+## Licence and attribution
 
----
+MIT—see [LICENSE](../../LICENSE).
 
-## Community
-
-- 💬 [Discord](https://discord.gg/NousResearch)
-- 📖 [Documentation](https://hermes-agent.nousresearch.com/docs/)
-- 🐛 [Issues](https://github.com/NousResearch/hermes-agent/issues)
-
----
-
-## License
-
-MIT — see [LICENSE](../../LICENSE).
-
-Built by [Nous Research](https://nousresearch.com).
+LexEdge AI is an independent legal-industry customisation of the MIT-licensed [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent). LexEdge AI is not affiliated with, endorsed by, sponsored by, or partnered with Nous Research, Hermes Agent, or n8n. Their names, marks, and logos belong to their respective owners.

@@ -153,7 +153,9 @@ Full automation blueprints gallery: [hermes-agent.nousresearch.com/docs/referenc
 
 Documentation: [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com)
 
-GitHub: [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+LexEdge source: [github.com/Lexedgeai26/legal-hermes](https://github.com/Lexedgeai26/legal-hermes)
+
+Upstream Hermes Agent: [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
 
 ---
 

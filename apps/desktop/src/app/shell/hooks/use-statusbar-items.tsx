@@ -50,7 +50,7 @@ import type { StatusResponse } from '@/types/hermes'
 import { CRON_ROUTE } from '../../routes'
 import type { StatusbarItem, StatusbarSelectModifiers } from '../statusbar-controls'
 
-const HERMES_REPO_URL = 'https://github.com/NousResearch/hermes-agent'
+const HERMES_REPO_URL = 'https://github.com/Lexedgeai26/legal-hermes'
 
 interface StatusbarItemsOptions {
   agentsOpen: boolean

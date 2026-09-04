@@ -4,11 +4,16 @@ This folder contains product, architecture, operations, and implementation notes
 
 LexEdge is built on the MIT-licensed Hermes Agent project by Nous Research:
 
+- LexEdge source: https://github.com/Lexedgeai26/legal-hermes
+- Product overview: https://lexedge.ai/agent/
 - Upstream project: https://github.com/NousResearch/hermes-agent
 - LexEdge website: https://www.lexedge.ai/
 
 ## Start Here
 
+- [Desktop Installation for macOS and Windows](desktop-installation.md)
+- [Matter Workspaces](matter-workspaces.md)
+- [Using LexEdge with n8n](n8n-guide.md)
 - [Developer Handbook](developer/README.md)
 - [Architecture Overview](developer/architecture.md)
 - [Feature Extension Guide](developer/feature-extension-guide.md)
@@ -25,3 +30,8 @@ LexEdge is built on the MIT-licensed Hermes Agent project by Nous Research:
 - [WhatsApp legal messaging guide](lexedge-whatsapp-legal-messaging-guide.md)
 - [Importing Claude skills — full guide](claude-skill-import.md)
 - [Help docs](help-docs/)
+
+## Support
+
+- Public bugs and feature requests: https://github.com/Lexedgeai26/legal-hermes/issues
+- Private security reports: https://github.com/Lexedgeai26/legal-hermes/security/advisories/new

@@ -1,11 +1,11 @@
 {
   "id": "hermes-agent",
-  "name": "Hermes Agent",
+  "name": "LexEdge Legal Hermes",
   "version": "0.17.0",
-  "description": "Self-improving open-source AI agent by Nous Research with ACP editor integration, persistent memory, skills, and rich tool support.",
-  "repository": "https://github.com/NousResearch/hermes-agent",
-  "website": "https://hermes-agent.nousresearch.com/docs/user-guide/features/acp",
-  "authors": ["Nous Research"],
+  "description": "Open-source legal personal AI agent with ACP integration, Matter Workspaces, legal skills, persistent memory, and rich tool support.",
+  "repository": "https://github.com/Lexedgeai26/legal-hermes",
+  "website": "https://lexedge.ai/agent/",
+  "authors": ["LexEdge AI", "Nous Research"],
   "license": "MIT",
   "distribution": {
     "uvx": {

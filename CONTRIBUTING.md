@@ -115,8 +115,8 @@ system `python3 -m hermes_cli.main` can pick up unrelated system Python
 packages.
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git
-cd hermes-agent
+git clone https://github.com/Lexedgeai26/legal-hermes.git
+cd legal-hermes
 
 # Create venv with Python 3.11
 uv venv venv --python 3.11
@@ -939,7 +939,7 @@ test(tools): add unit tests for file_operations
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/NousResearch/hermes-agent/issues)
+- Use [GitHub Issues](https://github.com/Lexedgeai26/legal-hermes/issues)
 - Include: OS, Python version, Hermes version (`hermes version`), full error traceback
 - Include steps to reproduce
 - Check existing issues before creating duplicates
@@ -949,8 +949,9 @@ test(tools): add unit tests for file_operations
 
 ## Community
 
-- **Discord**: [discord.gg/NousResearch](https://discord.gg/NousResearch) — for questions, showcasing projects, and sharing skills
-- **GitHub Discussions**: For design proposals and architecture discussions
+- **LexEdge website**: [lexedge.ai/agent](https://lexedge.ai/agent/) — product and download guidance
+- **GitHub Issues**: [Lexedgeai26/legal-hermes/issues](https://github.com/Lexedgeai26/legal-hermes/issues) — bugs and feature requests
+- **Upstream community**: [Nous Research Discord](https://discord.gg/NousResearch) — upstream Hermes discussion
 - **Skills Hub**: Upload specialized skills to a registry and share them with the community
 
 ---

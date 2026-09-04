@@ -71,7 +71,7 @@ DEFAULT_CATALOG_URL = (
 # is the same manifest published from the same repo and is not bot-gated,
 # so we fall through to it whenever the primary URL fails.
 DEFAULT_CATALOG_FALLBACK_URLS: tuple[str, ...] = (
-    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/website/static/api/model-catalog.json",
+    "https://raw.githubusercontent.com/Lexedgeai26/legal-hermes/main/website/static/api/model-catalog.json",
 )
 DEFAULT_TTL_HOURS = 1
 DEFAULT_FETCH_TIMEOUT = 8.0
