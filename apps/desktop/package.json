@@ -189,6 +189,10 @@
         "to": "bootstrap/install.ps1"
       },
       {
+        "from": "../../scripts/install.sh",
+        "to": "bootstrap/install.sh"
+      },
+      {
         "from": "build/hermes-agent-source.zip",
         "to": "bootstrap/hermes-agent-source.zip"
       },

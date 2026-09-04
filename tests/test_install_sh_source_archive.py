@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,3 +23,16 @@ def test_desktop_passes_packaged_archive_to_posix_installer():
     ).read_text(encoding="utf-8")
 
     assert "args.push('--source-archive', sourceArchive)" in source
+
+
+def test_desktop_package_bundles_installers_for_both_platform_families():
+    package = json.loads(
+        (ROOT / "apps" / "desktop" / "package.json").read_text(encoding="utf-8")
+    )
+    resources = {
+        (entry.get("from"), entry.get("to"))
+        for entry in package["build"]["extraResources"]
+    }
+
+    assert ("../../scripts/install.ps1", "bootstrap/install.ps1") in resources
+    assert ("../../scripts/install.sh", "bootstrap/install.sh") in resources
