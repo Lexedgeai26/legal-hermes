@@ -32,7 +32,7 @@ jobs:
           echo "Authorized: '${ACTOR}' is an admin."
 
   build:
-    name: Hermes-Setup.exe
+    name: LexEdge-Hermes-Agent-Setup.exe
     needs: authorize
     runs-on: windows-latest
     timeout-minutes: 30
@@ -73,7 +73,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign Hermes-Setup.exe with Azure Artifact Signing
+      - name: Sign LexEdge-Hermes-Agent-Setup.exe with Azure Artifact Signing
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2
         with:
           endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
@@ -90,11 +90,11 @@ jobs:
       - name: Upload NSIS installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: Hermes-Setup-installer
+          name: LexEdge-Hermes-Agent-Setup-installer
           path: apps/bootstrap-installer/src-tauri/target/release/bundle/nsis/*.exe
 
       - name: Upload raw exe
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: Hermes-Setup-exe
-          path: apps/bootstrap-installer/src-tauri/target/release/Hermes-Setup.exe
+          name: LexEdge-Hermes-Agent-Setup-exe
+          path: apps/bootstrap-installer/src-tauri/target/release/LexEdge-Hermes-Agent-Setup.exe

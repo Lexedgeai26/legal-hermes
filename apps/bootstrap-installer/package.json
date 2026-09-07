@@ -1,8 +1,8 @@
 {
-  "name": "@hermes/bootstrap-installer",
+  "name": "@lexedge/hermes-agent-bootstrap-installer",
   "private": true,
   "version": "0.0.1",
-  "description": "Hermes Setup — signed installer that drives scripts/install.ps1 with a polished native UI.",
+  "description": "LexEdge Hermes Agent Setup — signed installer that drives scripts/install.ps1 with a polished native UI.",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5175",

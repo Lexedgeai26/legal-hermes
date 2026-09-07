@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-    Hermes Setup application manifest.
+    LexEdge Hermes Agent Setup application manifest.
 
     The TL;DR: tell Windows we are NOT an installer in the classic "needs
     UAC elevation" sense, despite the product name. We provision into
@@ -8,7 +8,7 @@
     Program Files. install.ps1 runs as a child process and elevates
     itself only if a future stage explicitly needs HKLM access.
 
-    Without this manifest, the "Hermes Setup" productName embedded in
+    Without this manifest, the "LexEdge Hermes Agent Setup" productName embedded in
     the binary's resource trips Windows's installer-detection heuristic
     (https://learn.microsoft.com/en-us/windows/security/identity-protection/
     user-account-control/how-user-account-control-works#installer-detection)
@@ -19,10 +19,10 @@
     <assemblyIdentity
         version="0.0.1.0"
         processorArchitecture="*"
-        name="NousResearch.Hermes.Setup"
+        name="LexEdgeAILabs.LexEdgeHermesAgent.Setup"
         type="win32"
     />
-    <description>Hermes Setup</description>
+    <description>LexEdge Hermes Agent Setup</description>
 
     <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
         <security>

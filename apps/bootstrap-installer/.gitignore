@@ -1,6 +1,8 @@
 # Rust / Cargo
 /src-tauri/target/
-/src-tauri/Cargo.lock
+# Cargo.lock IS tracked: this crate is a distributed binary, not a
+# library, and release builds must be reproducible from a pinned
+# commit (see the unified-installer handoff, release gate 11).
 
 # Vite / build output
 /dist/

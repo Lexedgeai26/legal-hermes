@@ -1,24 +1,24 @@
 [package]
-name = "hermes-bootstrap"
+name = "lexedge-hermes-agent-bootstrap"
 version = "0.0.1"
-description = "Hermes Setup — signed installer that drives scripts/install.ps1"
-authors = ["Nous Research <info@nousresearch.com>"]
+description = "LexEdge Hermes Agent Setup — signed installer that drives scripts/install.ps1"
+authors = ["LexEdge AI Labs Private Limited"]
 edition = "2021"
 rust-version = "1.77"
 
 # Rename the output binary so the distributed artifact is literally
-# `Hermes-Setup.exe` on disk — not `hermes-bootstrap.exe`. Grandma sees
+# `LexEdge-Hermes-Agent-Setup.exe` on disk — not `lexedge-hermes-agent-bootstrap.exe`. The user sees
 # what we hand her, period. Tauri honors [[bin]] over [package].name
 # for the produced executable name.
 [[bin]]
-name = "Hermes-Setup"
+name = "LexEdge-Hermes-Agent-Setup"
 path = "src/main.rs"
 
 # The library target name MUST match the `withGlobalTauri` binding name that
 # tauri.conf.json's `app.windows[].label` references. We don't ship a separate
 # lib for now; everything is in src/.
 [lib]
-name = "hermes_bootstrap_lib"
+name = "lexedge_hermes_agent_bootstrap_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -41,7 +41,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # HTTP — rustls so we don't need OpenSSL on the build box
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 
 # Logging — emitted to a file under HERMES_HOME/logs/ and (optionally) the
 # webview console via Tauri's event channel.
