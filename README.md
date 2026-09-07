@@ -120,6 +120,7 @@ Never commit `.env` files, API keys, OAuth tokens, client documents, matter expo
 | Guide | Audience |
 | --- | --- |
 | [Desktop installation](docs/desktop-installation.md) | macOS and Windows users |
+| [Introductory video recording guide](docs/legal-user-intro-video-recording-guide.md) | presenters, trainers, and legal-user onboarding teams |
 | [Matter Workspaces](docs/matter-workspaces.md) | lawyers and legal teams |
 | [n8n integration](docs/n8n-guide.md) | firms using workflow automation |
 | [Installation and builds](INSTALL.md) | developers and release engineers |

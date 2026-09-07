@@ -12,6 +12,7 @@ LexEdge is built on the MIT-licensed Hermes Agent project by Nous Research:
 ## Start Here
 
 - [Desktop Installation for macOS and Windows](desktop-installation.md)
+- [Introductory video recording guide for legal users](legal-user-intro-video-recording-guide.md)
 - [Matter Workspaces](matter-workspaces.md)
 - [Using LexEdge with n8n](n8n-guide.md)
 - [Unified Online Installer implementation plan](unified-online-installer-implementation-plan.md)
