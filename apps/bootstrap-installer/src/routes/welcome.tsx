@@ -1,19 +1,22 @@
 import { type CSSProperties } from 'react'
 import { Button } from '../components/button'
-import { startInstall } from '../store'
+import { beginPrivateAiChoice } from '../store'
 import { ArrowRight } from 'lucide-react'
 
 /*
  * Welcome screen.
  *
  * Mirrors the desktop's chat intro (apps/desktop/src/components/chat/intro.tsx):
- *   - HERMES AGENT wordmark rendered in Collapse Bold, uppercase, tracked
+ *   - LEXEDGE HERMES AGENT wordmark rendered in Collapse Bold, uppercase, tracked
  *   - mix-blend-plus-lighter so the type "glows" on the canvas
  *   - fit-text utility so the wordmark sizes itself to the column
  *
  * No install-path footer. The default install location is correct for
- * 99% of users; the rest will use the CLI installer with a -HermesHome
- * flag. Showing %LOCALAPPDATA% to grandma is developer-brain.
+ * almost everyone; the rest use the CLI installer with a -HermesHome flag.
+ *
+ * The install button opens the Private AI decision rather than starting the
+ * install outright, so the user is asked about local inference before
+ * anything is downloaded.
  */
 export default function Welcome() {
   return (
@@ -31,9 +34,9 @@ export default function Welcome() {
           }
         >
           <span>
-            <span>HERMES AGENT</span>
+            <span>LEXEDGE HERMES AGENT</span>
           </span>
-          <span aria-hidden="true">HERMES AGENT</span>
+          <span aria-hidden="true">LEXEDGE HERMES AGENT</span>
         </p>
 
         <p className="m-0 text-center text-base leading-normal tracking-tight text-muted-foreground">
@@ -43,16 +46,23 @@ export default function Welcome() {
       </div>
 
       <Button
-        onClick={() => void startInstall()}
+        onClick={() => beginPrivateAiChoice()}
         size="lg"
         className="group inline-flex items-center gap-2 px-6"
       >
-        Install Hermes
+        Install LexEdge Hermes Agent
         <ArrowRight
           size={18}
           className="transition-transform group-hover:translate-x-0.5"
         />
       </Button>
+
+      {/* Attribution. Nous Research is credited as the upstream project
+          author; the publisher and product owner is LexEdge AI Labs. */}
+      <p className="m-0 max-w-md text-center text-xs leading-relaxed text-muted-foreground/70">
+        Published by LexEdge AI Labs Private Limited. Built on Hermes, an open
+        project by Nous Research.
+      </p>
     </div>
   )
 }

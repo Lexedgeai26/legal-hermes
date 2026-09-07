@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "notAfter": "2099-01-01T00:00:00Z",
+  "disabledProfiles": [],
+  "embeddingModel": "embedding-dev:300m",
+  "embeddingDimensions": 768,
+  "catalogue": {
+    "schemaVersion": 1,
+    "id": "legal-desktop-dev",
+    "version": "0.0.0-dev",
+    "profiles": [
+      {
+        "id": "legal-standard",
+        "friendlyName": "Legal Standard",
+        "ollamaModel": "legal-dev:9b",
+        "llmfitAliases": ["legal-dev-9b", "legal dev 9b"],
+        "minimumRamGb": 16,
+        "recommendedRamGb": 24,
+        "minimumVramGb": 0,
+        "requiresGpu": false,
+        "downloadSizeGb": 5.5,
+        "operationalContextTokens": 16384,
+        "targetTps": 20,
+        "legalBenchmark": { "approved": true, "score": 82, "version": "dev-1" }
+      },
+      {
+        "id": "legal-compact",
+        "friendlyName": "Legal Compact",
+        "ollamaModel": "legal-dev:3b",
+        "llmfitAliases": ["legal-dev-3b"],
+        "minimumRamGb": 8,
+        "recommendedRamGb": 12,
+        "minimumVramGb": 0,
+        "requiresGpu": false,
+        "downloadSizeGb": 2.1,
+        "operationalContextTokens": 8192,
+        "targetTps": 25,
+        "legalBenchmark": { "approved": true, "score": 74, "version": "dev-1" }
+      },
+      {
+        "id": "legal-large",
+        "friendlyName": "Legal Large",
+        "ollamaModel": "legal-dev:27b",
+        "llmfitAliases": ["legal-dev-27b"],
+        "minimumRamGb": 48,
+        "recommendedRamGb": 64,
+        "minimumVramGb": 24,
+        "requiresGpu": true,
+        "downloadSizeGb": 17.0,
+        "operationalContextTokens": 32768,
+        "targetTps": 12,
+        "legalBenchmark": { "approved": true, "score": 88, "version": "dev-1" }
+      }
+    ]
+  }
+}

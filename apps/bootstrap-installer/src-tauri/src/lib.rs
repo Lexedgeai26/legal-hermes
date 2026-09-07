@@ -1,4 +1,4 @@
-//! Hermes Setup — Tauri entrypoint.
+//! LexEdge Hermes Agent Setup — Tauri entrypoint.
 //!
 //! Spawns a single window pointed at the React frontend (apps/bootstrap-installer/src/).
 //! All install-time work lives in `bootstrap.rs` and is invoked through the Tauri
@@ -9,15 +9,20 @@
 //! flags of the executable that consumes it.
 
 mod bootstrap;
+mod catalogue;
 mod events;
 mod hardware;
 mod install_script;
 mod llmfit;
 mod powershell;
+mod ollama_api;
 mod paths;
 mod private_ai;
+mod private_ai_flow;
+mod runtime;
 mod signed_envelope;
 mod update;
+mod validation;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -25,7 +30,7 @@ use tokio::sync::Mutex;
 /// How the installer was invoked. Resolved once from the process args in
 /// `run()` and exposed to the frontend via `get_mode` so it can route to the
 /// install flow (first-run onboarding) or the update flow (driven by the
-/// desktop app handing off via `Hermes-Setup.exe --update`).
+/// desktop app handing off via the staged `hermes-setup.exe --update`).
 ///
 /// Bare launch (double-click, first-run) => Install.
 /// `--update` (spawned by the desktop's "Update" button) => Update.
@@ -189,9 +194,10 @@ pub fn run() {
             // it performs no downloads or configuration writes.
             private_ai::recommend_private_ai_models,
             private_ai::validate_private_ai_runtime_config,
+            private_ai_flow::analyze_private_ai_options,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Hermes Setup");
+        .expect("error while running LexEdge Hermes Agent Setup");
 }
 
 #[cfg(test)]

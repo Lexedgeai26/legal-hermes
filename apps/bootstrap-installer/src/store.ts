@@ -60,11 +60,22 @@ const INITIAL: BootstrapStateModel = {
 // Atoms
 // ---------------------------------------------------------------------------
 
-export type Route = 'welcome' | 'progress' | 'success' | 'failure'
+export type Route =
+  | 'welcome'
+  | 'privacy'
+  | 'analysis'
+  | 'progress'
+  | 'success'
+  | 'failure'
+
+/// Whether the user opted into local inference. 'undecided' is the only state
+/// in which the installer has not yet been told what to do; it must never be
+/// resolved on the user's behalf.
+export type PrivateAiChoice = 'undecided' | 'private' | 'cloud'
 
 /// How the installer was launched, mirrored from src-tauri AppMode.
 /// 'install' = first-run onboarding (bare launch). 'update' = driven by the
-/// desktop app handing off via `Hermes-Setup.exe --update`.
+/// desktop app handing off via the staged `hermes-setup.exe --update`.
 export type AppMode = 'install' | 'update'
 
 export const $route = atom<Route>('welcome')
@@ -72,6 +83,13 @@ export const $mode = atom<AppMode>('install')
 export const $bootstrap = atom<BootstrapStateModel>(INITIAL)
 export const $logPath = atom<string | null>(null)
 export const $hermesHome = atom<string | null>(null)
+export const $privateAiChoice = atom<PrivateAiChoice>('undecided')
+export const $analysis = atom<PrivateAiAnalysis | null>(null)
+export const $analysisError = atom<string | null>(null)
+export const $analysisPending = atom<boolean>(false)
+/// The profile the user has chosen. Defaults to the recommendation, but the
+/// installer never substitutes it silently afterwards.
+export const $selectedProfileId = atom<string | null>(null)
 
 export const $progress = computed($bootstrap, (b) => {
   const total = b.stageOrder.length
@@ -83,6 +101,61 @@ export const $progress = computed($bootstrap, (b) => {
   }
   return { done, total, fraction: done / total }
 })
+
+// ---------------------------------------------------------------------------
+// Private AI — mirrors src-tauri/src/private_ai_flow.rs
+// ---------------------------------------------------------------------------
+
+export interface ModelRecommendation {
+  profileId: string
+  friendlyName: string
+  ollamaModel: string
+  fit: string
+  executionMode: string
+  quantization: string | null
+  estimatedTokensPerSecond: number | null
+  estimatedMemoryGb: number | null
+  downloadSizeGb: number
+  operationalContextTokens: number
+  recommended: boolean
+  reasons: string[]
+  warnings: string[]
+}
+
+export interface ExcludedProfile {
+  profileId: string
+  friendlyName: string
+  reasons: string[]
+}
+
+export interface PrivateAiAnalysis {
+  hardware: {
+    os: { name: string; version: string; arch: string }
+    cpu: { model: string; physicalCores: number; logicalCores: number }
+    memory: { totalGb: number; availableGb: number }
+    gpus: Array<{ vendor: string; model: string; dedicatedVramGb: number; backend: string | null }>
+    storage: Array<{ volume: string; freeGb: number }>
+    existingRuntime: {
+      found: boolean
+      version: string | null
+      port: number | null
+      managedByProduct: boolean
+    }
+  }
+  recommendation: {
+    compatible: ModelRecommendation[]
+    excluded: ExcludedProfile[]
+    usedConservativeFallback: boolean
+  }
+  catalogueId: string
+  catalogueVersion: string
+  embeddingModel: string
+  embeddingDimensions: number
+  totalDownloadGb: number
+  embeddingDownloadGb: number
+  freeDiskGb: number
+  usedConservativeFallback: boolean
+}
 
 // ---------------------------------------------------------------------------
 // Tauri event subscription
@@ -255,7 +328,7 @@ export async function startInstall(opts?: { branch?: string }): Promise<void> {
 }
 
 export async function startUpdate(): Promise<void> {
-  // Update is driven by the desktop handing off (Hermes-Setup.exe --update);
+  // Update is driven by the desktop handing off (hermes-setup.exe --update);
   // there's no welcome click. Reset + jump straight to progress, then let the
   // Rust side stream the synthetic update manifest.
   $bootstrap.set(INITIAL)
@@ -275,4 +348,55 @@ export async function launchHermesDesktop(): Promise<void> {
 
 export async function openLogDir(): Promise<void> {
   await invoke('open_log_dir')
+}
+
+// ---------------------------------------------------------------------------
+// Private AI actions
+// ---------------------------------------------------------------------------
+
+/// Move from Welcome into the Private AI explanation. Nothing is installed and
+/// nothing is detected until the user has read what local inference means.
+export function beginPrivateAiChoice(): void {
+  $privateAiChoice.set('undecided')
+  $analysisError.set(null)
+  $route.set('privacy')
+}
+
+/// Consent to local inference, then analyse this machine.
+export async function choosePrivateAi(): Promise<void> {
+  $privateAiChoice.set('private')
+  $route.set('analysis')
+  await analyzePrivateAi()
+}
+
+/// Decline local inference. The base install proceeds unchanged — Private AI
+/// is additive and skipping it must never degrade the product.
+export async function chooseCloudProvider(): Promise<void> {
+  $privateAiChoice.set('cloud')
+  $analysis.set(null)
+  $selectedProfileId.set(null)
+  await startInstall()
+}
+
+export async function analyzePrivateAi(): Promise<void> {
+  $analysisPending.set(true)
+  $analysisError.set(null)
+  try {
+    const analysis = await invoke<PrivateAiAnalysis>('analyze_private_ai_options')
+    $analysis.set(analysis)
+    // Pre-select the recommendation, but leave it a user-owned choice.
+    const recommended =
+      analysis.recommendation.compatible.find((m) => m.recommended) ??
+      analysis.recommendation.compatible[0]
+    $selectedProfileId.set(recommended ? recommended.profileId : null)
+  } catch (err) {
+    $analysis.set(null)
+    $analysisError.set(err instanceof Error ? err.message : String(err))
+  } finally {
+    $analysisPending.set(false)
+  }
+}
+
+export function selectProfile(profileId: string): void {
+  $selectedProfileId.set(profileId)
 }
