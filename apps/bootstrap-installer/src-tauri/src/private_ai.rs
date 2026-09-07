@@ -45,21 +45,21 @@ pub struct NormalizedHardware {
     pub backend: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LlmFitReport {
     #[serde(default)]
     pub models: Vec<LlmFitModel>,
     pub system: Option<LlmFitSystem>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LlmFitSystem {
     pub total_ram_gb: Option<f64>,
     pub gpu_vram_gb: Option<f64>,
     pub backend: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LlmFitModel {
     pub name: String,
     pub ollama_name: Option<String>,

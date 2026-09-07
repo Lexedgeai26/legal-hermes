@@ -4,7 +4,7 @@
   "title": "LexEdge Signed Component Manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "releaseId", "channel", "issuedAt", "expiresAt", "components", "keyId", "signature"],
+  "required": ["schemaVersion", "releaseId", "channel", "issuedAt", "expiresAt", "components"],
   "properties": {
     "schemaVersion": { "const": 1 }, "releaseId": { "type": "string", "minLength": 1 },
     "channel": { "enum": ["development", "canary", "stable", "enterprise"] }, "issuedAt": { "type": "string", "format": "date-time" },
@@ -23,7 +23,6 @@
           "authenticodeRequired": { "type": "boolean", "default": false }, "rollbackVersion": { "type": ["string", "null"] }
         }
       }
-    },
-    "keyId": { "type": "string", "minLength": 1 }, "signature": { "type": "string", "minLength": 1 }
+    }
   }
 }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexedge.ai/schemas/signed-envelope.v1.schema.json",
+  "title": "LexEdge Signed JSON Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "keyId", "algorithm", "payload", "signature"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "keyId": { "type": "string", "minLength": 1 },
+    "algorithm": { "const": "Ed25519" },
+    "payload": { "type": "string", "contentEncoding": "base64", "minLength": 1 },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 1 }
+  }
+}

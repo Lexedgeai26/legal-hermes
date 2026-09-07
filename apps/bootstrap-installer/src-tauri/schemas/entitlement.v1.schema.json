@@ -4,11 +4,10 @@
   "title": "LexEdge Installer Entitlement",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "plan", "allowedProfiles", "expiresAt", "policy", "keyId", "signature"],
+  "required": ["schemaVersion", "plan", "allowedProfiles", "expiresAt", "policy"],
   "properties": {
     "schemaVersion": { "const": 1 }, "plan": { "type": "string", "minLength": 1 },
     "allowedProfiles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
-    "expiresAt": { "type": "string", "format": "date-time" }, "policy": { "type": "object" },
-    "keyId": { "type": "string", "minLength": 1 }, "signature": { "type": "string", "minLength": 1 }
+    "expiresAt": { "type": "string", "format": "date-time" }, "policy": { "type": "object" }
   }
 }

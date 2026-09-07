@@ -10,10 +10,13 @@
 
 mod bootstrap;
 mod events;
+mod hardware;
 mod install_script;
+mod llmfit;
 mod powershell;
 mod paths;
 mod private_ai;
+mod signed_envelope;
 mod update;
 
 use std::sync::Arc;
@@ -181,6 +184,7 @@ pub fn run() {
             paths::get_log_path,
             paths::get_hermes_home,
             paths::open_log_dir,
+            hardware::detect_private_ai_hardware,
             // Private AI model-fit and catalogue intersection. This is pure;
             // it performs no downloads or configuration writes.
             private_ai::recommend_private_ai_models,

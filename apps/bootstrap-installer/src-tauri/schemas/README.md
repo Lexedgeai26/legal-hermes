@@ -45,3 +45,5 @@ The renderer may request a choice, cancellation, retry, or skip through narrow T
 - `download-state.v1.schema.json`: non-sensitive resumable download metadata.
 - `installer-resume-state.v1.schema.json`: idempotent Private AI stage checkpoint.
 - `runtime-config.v1.schema.json`: canonical installer-to-Electron managed runtime contract.
+
+Catalogue, entitlement, and component-manifest payloads are transported inside `signed-envelope.v1.schema.json`. The Ed25519 signature covers the exact base64-decoded payload bytes, so verification never depends on JSON key ordering or reserialization.
