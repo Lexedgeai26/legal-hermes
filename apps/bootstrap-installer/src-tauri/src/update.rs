@@ -979,7 +979,9 @@ mod tests {
             "venv shim remains part of the update lock probe"
         );
         assert!(
-            probes.iter().any(|p| p.ends_with(Path::new("resources/app.asar"))),
+            probes
+                .iter()
+                .any(|p| p.file_name().is_some_and(|name| name == "app.asar")),
             "packaged app.asar must be probed so repair/re-clone waits for the old desktop to exit"
         );
     }

@@ -157,19 +157,50 @@ pub struct ExcludedProfile {
     pub reasons: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeConfig {
     pub schema_version: u32,
     pub managed: bool,
-    pub host: String,
-    pub port: u16,
+    pub ollama: OllamaRuntimeConfig,
+    pub models: RuntimeModelsConfig,
+    pub catalog: RuntimeCatalogConfig,
+    pub privacy: RuntimePrivacyConfig,
+    pub installed_at: Option<String>,
+    pub validated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaRuntimeConfig {
+    pub base_url: String,
+    pub runtime_version: String,
+    pub cloud_disabled: bool,
+    pub managed_process: bool,
     pub runtime_path: String,
     pub models_path: String,
-    pub generation_model: String,
-    pub embedding_model: String,
-    pub catalogue_id: Option<String>,
-    pub catalogue_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeModelsConfig {
+    pub profile_id: String,
+    pub generation: String,
+    pub embedding: String,
+    pub context_tokens: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RuntimeCatalogConfig {
+    pub id: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimePrivacyConfig {
+    pub bind_localhost_only: bool,
+    pub telemetry_enabled: bool,
 }
 
 /// Tauri boundary for the future model-selection screen. Keeping the command
@@ -195,31 +226,75 @@ pub fn validate_private_ai_runtime_config(config: RuntimeConfig) -> Result<(), S
     if !config.managed {
         return Err("Managed runtime configuration must set managed=true".to_string());
     }
-    if !matches!(config.host.trim(), "127.0.0.1" | "::1" | "localhost") {
+    let base_url = reqwest::Url::parse(config.ollama.base_url.trim())
+        .map_err(|_| "Managed runtime base URL is invalid".to_string())?;
+    if base_url.scheme() != "http"
+        || !matches!(
+            base_url.host_str(),
+            Some("127.0.0.1" | "::1" | "[::1]" | "localhost")
+        )
+        || base_url.port().is_none()
+        || !base_url.username().is_empty()
+        || base_url.password().is_some()
+        || base_url.query().is_some()
+        || base_url.fragment().is_some()
+        || !matches!(base_url.path(), "" | "/")
+    {
         return Err("Managed runtime host must be loopback-only".to_string());
     }
-    if config.port < 1024 {
+    if base_url.port().is_some_and(|port| port < 1024) {
         return Err("Managed runtime port must be between 1024 and 65535".to_string());
     }
+    if !config.ollama.cloud_disabled {
+        return Err("Managed Private AI runtime must disable Ollama cloud access".to_string());
+    }
+    if !config.ollama.managed_process {
+        return Err("Managed runtime configuration must mark the process as managed".to_string());
+    }
+    if !config.privacy.bind_localhost_only {
+        return Err("Managed runtime privacy must require loopback binding".to_string());
+    }
     for (label, value) in [
-        ("runtime path", config.runtime_path.as_str()),
-        ("models path", config.models_path.as_str()),
-        ("generation model", config.generation_model.as_str()),
-        ("embedding model", config.embedding_model.as_str()),
+        ("runtime version", config.ollama.runtime_version.as_str()),
+        ("runtime path", config.ollama.runtime_path.as_str()),
+        ("models path", config.ollama.models_path.as_str()),
+        ("profile id", config.models.profile_id.as_str()),
+        ("generation model", config.models.generation.as_str()),
+        ("embedding model", config.models.embedding.as_str()),
+        ("catalogue id", config.catalog.id.as_str()),
+        ("catalogue version", config.catalog.version.as_str()),
     ] {
         if value.trim().is_empty() {
             return Err(format!("Managed runtime {label} cannot be empty"));
         }
     }
-    for (label, value) in [
-        ("catalogue id", config.catalogue_id.as_deref()),
-        ("catalogue version", config.catalogue_version.as_deref()),
+    if config.models.context_tokens == 0 {
+        return Err("Managed runtime context tokens must be greater than zero".to_string());
+    }
+    for (label, model) in [
+        ("generation model", config.models.generation.as_str()),
+        ("embedding model", config.models.embedding.as_str()),
     ] {
-        if value.is_some_and(|item| item.trim().is_empty()) {
-            return Err(format!("Managed runtime {label} cannot be empty"));
+        if !is_pinned_model_identity(model) {
+            return Err(format!(
+                "Managed runtime {label} must use an exact non-latest tag or digest"
+            ));
         }
     }
     Ok(())
+}
+
+fn is_pinned_model_identity(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() || normalized.ends_with(":latest") {
+        return false;
+    }
+    normalized
+        .split_once('@')
+        .is_some_and(|(name, digest)| !name.is_empty() && !digest.is_empty())
+        || normalized
+            .rsplit_once(':')
+            .is_some_and(|(name, tag)| !name.is_empty() && !tag.is_empty())
 }
 
 pub fn recommend_models(request: RecommendationRequest) -> Result<RecommendationResponse, String> {
@@ -681,14 +756,30 @@ mod tests {
         RuntimeConfig {
             schema_version: 1,
             managed: true,
-            host: "127.0.0.1".to_string(),
-            port: 11434,
-            runtime_path: "private-ai/runtime/ollama".to_string(),
-            models_path: "private-ai/models".to_string(),
-            generation_model: "legal-test:9b".to_string(),
-            embedding_model: "embedding-test:latest".to_string(),
-            catalogue_id: Some("legal-desktop".to_string()),
-            catalogue_version: Some("test".to_string()),
+            ollama: OllamaRuntimeConfig {
+                base_url: "http://127.0.0.1:11434".to_string(),
+                runtime_version: "0.12.0-test".to_string(),
+                cloud_disabled: true,
+                managed_process: true,
+                runtime_path: "private-ai/runtime/ollama".to_string(),
+                models_path: "private-ai/models".to_string(),
+            },
+            models: RuntimeModelsConfig {
+                profile_id: "legal-standard".to_string(),
+                generation: "legal-test:9b".to_string(),
+                embedding: "embedding-test:300m".to_string(),
+                context_tokens: 8192,
+            },
+            catalog: RuntimeCatalogConfig {
+                id: "legal-desktop".to_string(),
+                version: "test".to_string(),
+            },
+            privacy: RuntimePrivacyConfig {
+                bind_localhost_only: true,
+                telemetry_enabled: false,
+            },
+            installed_at: Some("2026-09-07T00:00:00Z".to_string()),
+            validated_at: None,
         }
     }
 
@@ -846,16 +937,41 @@ mod tests {
 
     #[test]
     fn runtime_config_accepts_loopback_only() {
-        for host in ["127.0.0.1", "::1", "localhost"] {
+        for host in [
+            "http://127.0.0.1:11434",
+            "http://[::1]:11434",
+            "http://localhost:11434",
+        ] {
             let mut config = runtime_config();
-            config.host = host.to_string();
+            config.ollama.base_url = host.to_string();
             validate_private_ai_runtime_config(config).unwrap();
         }
 
         let mut config = runtime_config();
-        config.host = "0.0.0.0".to_string();
+        config.ollama.base_url = "http://0.0.0.0:11434".to_string();
         assert!(validate_private_ai_runtime_config(config)
             .unwrap_err()
             .contains("loopback-only"));
+    }
+
+    #[test]
+    fn runtime_config_fixture_is_canonical_and_valid() {
+        let config: RuntimeConfig = serde_json::from_str(include_str!(
+            "../test-fixtures/runtime-config/v1/canonical.json"
+        ))
+        .unwrap();
+        validate_private_ai_runtime_config(config.clone()).unwrap();
+        let serialized = serde_json::to_value(config).unwrap();
+        assert_eq!(serialized["models"]["profileId"], "legal-standard");
+        assert_eq!(serialized["privacy"]["bindLocalhostOnly"], true);
+    }
+
+    #[test]
+    fn runtime_config_rejects_mutable_model_tags() {
+        let mut config = runtime_config();
+        config.models.generation = "legal-test:latest".to_string();
+        assert!(validate_private_ai_runtime_config(config)
+            .unwrap_err()
+            .contains("exact non-latest"));
     }
 }

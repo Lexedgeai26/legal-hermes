@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexedge.ai/schemas/download-state.v1.schema.json",
+  "title": "LexEdge Resumable Download State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "downloadId", "componentId", "url", "expectedBytes", "receivedBytes", "expectedSha256", "partialPath", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "downloadId": { "type": "string", "minLength": 1 }, "componentId": { "type": "string", "minLength": 1 },
+    "url": { "type": "string", "format": "uri", "pattern": "^https://" }, "expectedBytes": { "type": "integer", "minimum": 1 },
+    "receivedBytes": { "type": "integer", "minimum": 0 }, "expectedSha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "partialPath": { "type": "string", "minLength": 1 }, "etag": { "type": ["string", "null"] },
+    "lastModified": { "type": ["string", "null"] }, "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

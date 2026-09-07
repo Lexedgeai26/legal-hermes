@@ -177,21 +177,13 @@ EXISTING_BASE_INSTALL
 
 Skipping or failing optional Private AI setup after the base install must transition safely to the existing desktop handoff. Every state must be idempotent and resumable.
 
-## 6. Contract decision required before further implementation
+## 6. Canonical runtime contract decision
 
-The current `runtime-config.v1.schema.json` uses flat fields such as `host`, `port`, `runtimePath`, and `generationModel`. The source PRD proposes nested `ollama`, `models`, `catalog`, and `privacy` objects.
+Runtime configuration Version 1 now uses the nested `ollama`, `models`, `catalog`, and `privacy` structure in `runtime-config.v1.schema.json`. It includes runtime version, cloud-disabled status, managed-process ownership, profile ID, pinned generation and embedding identities, context tokens, catalogue identity, and privacy state.
 
-Before implementing the writer or Electron reader:
+The earlier flat structure was a development-only draft and was never written by a released installer. It is not accepted for runtime activation. If encountered during development, managed model files are preserved and the canonical file is regenerated only after ownership and model validation succeed. This policy avoids shipping two writable Version 1 formats or inventing missing security-critical values.
 
-1. Select one canonical Version 1 shape.
-2. Check existing provider and profile configuration for naming conflicts.
-3. Include runtime version, cloud-disabled status, managed-process marker, profile ID, context tokens, catalogue identity, and privacy state.
-4. Define how relative paths are resolved against `HERMES_HOME`.
-5. Define migration behavior for every accepted schema version.
-6. Generate or share types between Rust and TypeScript where practical.
-7. Add golden-file compatibility tests.
-
-Recommended direction: adopt the nested structure because it separates runtime, models, catalogue, and privacy concerns. Preserve backward compatibility by accepting the current flat development schema only as an explicitly migrated pre-release form. Do not ship two writable formats.
+Relative paths resolve below profile-aware `HERMES_HOME`; user-selected absolute model paths require boundary validation. The installer must write atomically, and Electron must validate again before runtime start. Golden fixture coverage begins at `test-fixtures/runtime-config/v1/canonical.json`.
 
 ## 7. Dependency-ordered implementation plan
 

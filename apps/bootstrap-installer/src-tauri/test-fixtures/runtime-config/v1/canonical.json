@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "managed": true,
+  "ollama": {
+    "baseUrl": "http://127.0.0.1:11434",
+    "runtimeVersion": "0.12.0-test",
+    "cloudDisabled": true,
+    "managedProcess": true,
+    "runtimePath": "private-ai/runtime/ollama",
+    "modelsPath": "private-ai/models"
+  },
+  "models": {
+    "profileId": "legal-standard",
+    "generation": "legal-test:9b",
+    "embedding": "embedding-test:300m",
+    "contextTokens": 8192
+  },
+  "catalog": { "id": "legal-desktop", "version": "test" },
+  "privacy": { "bindLocalhostOnly": true, "telemetryEnabled": false },
+  "installedAt": "2026-09-07T00:00:00Z",
+  "validatedAt": null
+}

@@ -4,28 +4,53 @@
   "title": "LexEdge Managed Private AI Runtime Configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "managed",
-    "host",
-    "port",
-    "runtimePath",
-    "modelsPath",
-    "generationModel",
-    "embeddingModel"
-  ],
+  "required": ["schemaVersion", "managed", "ollama", "models", "catalog", "privacy"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "managed": { "const": true },
-    "host": { "enum": ["127.0.0.1", "::1", "localhost"] },
-    "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
-    "runtimePath": { "type": "string", "minLength": 1 },
-    "modelsPath": { "type": "string", "minLength": 1 },
-    "generationModel": { "type": "string", "minLength": 1 },
-    "embeddingModel": { "type": "string", "minLength": 1 },
-    "catalogueId": { "type": "string", "minLength": 1 },
-    "catalogueVersion": { "type": "string", "minLength": 1 },
-    "installedAt": { "type": "string", "format": "date-time" },
+    "ollama": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseUrl", "runtimeVersion", "cloudDisabled", "managedProcess", "runtimePath", "modelsPath"],
+      "properties": {
+        "baseUrl": { "type": "string", "pattern": "^http://(127\\.0\\.0\\.1|localhost|\\[::1\\]):[0-9]{4,5}/?$" },
+        "runtimeVersion": { "type": "string", "minLength": 1 },
+        "cloudDisabled": { "const": true },
+        "managedProcess": { "const": true },
+        "runtimePath": { "type": "string", "minLength": 1 },
+        "modelsPath": { "type": "string", "minLength": 1 }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "generation", "embedding", "contextTokens"],
+      "properties": {
+        "profileId": { "type": "string", "minLength": 1 },
+        "generation": { "type": "string", "minLength": 3, "not": { "pattern": ":latest$" } },
+        "embedding": { "type": "string", "minLength": 3, "not": { "pattern": ":latest$" } },
+        "contextTokens": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindLocalhostOnly", "telemetryEnabled"],
+      "properties": {
+        "bindLocalhostOnly": { "const": true },
+        "telemetryEnabled": { "type": "boolean" }
+      }
+    },
+    "installedAt": { "type": ["string", "null"], "format": "date-time" },
     "validatedAt": { "type": ["string", "null"], "format": "date-time" }
   }
 }

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexedge.ai/schemas/entitlement.v1.schema.json",
+  "title": "LexEdge Installer Entitlement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "plan", "allowedProfiles", "expiresAt", "policy", "keyId", "signature"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "plan": { "type": "string", "minLength": 1 },
+    "allowedProfiles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "expiresAt": { "type": "string", "format": "date-time" }, "policy": { "type": "object" },
+    "keyId": { "type": "string", "minLength": 1 }, "signature": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexedge.ai/schemas/llmfit-normalized.v1.schema.json",
+  "title": "LexEdge Normalized llmfit Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "llmfitVersion", "analysedAt", "hardware", "models"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "llmfitVersion": { "type": "string", "minLength": 1 },
+    "analysedAt": { "type": "string", "format": "date-time" }, "hardware": { "$ref": "hardware.v1.schema.json" },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sourceModelName", "normalizedModelKey", "fitLevel", "reasons"],
+        "properties": {
+          "sourceModelName": { "type": "string", "minLength": 1 }, "normalizedModelKey": { "type": "string", "pattern": "^[a-z0-9]+$" },
+          "quantization": { "type": ["string", "null"] }, "fitLevel": { "enum": ["excellent", "good", "marginal", "incompatible", "unknown"] },
+          "estimatedMemoryGb": { "type": ["number", "null"], "minimum": 0 }, "estimatedTokensPerSecond": { "type": ["number", "null"], "minimum": 0 },
+          "executionBackend": { "type": ["string", "null"] }, "contextTokens": { "type": ["integer", "null"], "minimum": 1 },
+          "reasons": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

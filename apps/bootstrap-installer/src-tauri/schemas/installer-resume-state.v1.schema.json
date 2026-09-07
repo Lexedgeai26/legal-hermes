@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexedge.ai/schemas/installer-resume-state.v1.schema.json",
+  "title": "LexEdge Private AI Installer Resume State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sessionId", "status", "completedStages", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "sessionId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["running", "cancelled", "failed", "completed"] }, "currentStage": { "type": ["string", "null"] },
+    "completedStages": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "selectedProfileId": { "type": ["string", "null"] }, "selectedModelRoot": { "type": ["string", "null"] },
+    "downloadIds": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
