@@ -6485,10 +6485,25 @@ if (!_gotSingleInstanceLock) {
 } else {
   app.on('second-instance', (_event, argv) => {
     const url = _extractDeepLink(argv)
-    if (url) handleDeepLink(url)
-    else if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
+    if (url) {
+      handleDeepLink(url)
+      return
+    }
+    // `mainWindow` is never reset to null when its window closes, so a
+    // truthiness check is not enough: on macOS the app stays alive in the
+    // dock still holding a DESTROYED BrowserWindow. Calling isMinimized()
+    // on that throws "Object has been destroyed", and an uncaught throw in
+    // the main process puts a crash dialog in front of the user.
+    //
+    // This fires whenever anything re-launches the app while it is already
+    // running -- a dock/Finder open, a deep link, or the installer's launch
+    // hand-off. Mirror the 'activate' handler: recreate when the window is
+    // gone, otherwise focus it (focusWindow re-checks isDestroyed and also
+    // handles minimized/hidden).
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow()
+    } else {
+      focusWindow(mainWindow)
     }
   })
 }
