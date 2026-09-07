@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Hermes Agent Installer
+# LexEdge Hermes Agent Installer
 # ============================================================================
 # Installation script for Linux, macOS, and Android/Termux.
 # Uses uv for desktop/server installs and Python's stdlib venv + pip on Termux.
@@ -160,7 +160,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Hermes Agent Installer"
+            echo "LexEdge Hermes Agent Installer"
             echo ""
             echo "Usage: install.sh [OPTIONS]"
             echo ""
@@ -215,11 +215,14 @@ print_banner() {
     echo ""
     echo -e "${MAGENTA}${BOLD}"
     echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│             ⚕ Hermes Agent Installer                    │"
+    echo "│           ⚕ LexEdge Hermes Agent Installer              │"
     echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  An open source AI agent by Nous Research.              │"
+    echo "│  Private legal AI by LexEdge AI Labs Private Limited.   │"
     echo "└─────────────────────────────────────────────────────────┘"
     echo -e "${NC}"
+    # Nous Research stays credited as the upstream project author. LexEdge AI
+    # Labs is the publisher of this product.
+    echo -e "${NC}Built on Hermes, an open source project by Nous Research."
 }
 
 log_info() {
@@ -273,7 +276,7 @@ emit_manifest() {
     if [ "$INCLUDE_DESKTOP" = true ]; then
         desktop_stage='{"name":"desktop","title":"Build desktop app","category":"runtime","needs_user_input":false},'
     fi
-    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"Download Hermes Agent","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"Install hermes command","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
+    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"Download LexEdge Hermes Agent","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"Install hermes command","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
     printf '\n'
 }
 
@@ -1044,7 +1047,7 @@ install_system_packages() {
             if [ "$IS_INTERACTIVE" = true ]; then
                 echo ""
                 log_info "sudo is needed ONLY to install optional system packages (${pkgs[*]}) via your package manager."
-                log_info "Hermes Agent itself does not require or retain root access."
+                log_info "LexEdge Hermes Agent itself does not require or retain root access."
                 if prompt_yes_no "Install ${description}? (requires sudo)" "no"; then
                     if sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a $install_cmd; then
                         [ "$need_ripgrep" = true ] && HAS_RIPGREP=true && log_success "ripgrep installed"
@@ -1060,7 +1063,7 @@ install_system_packages() {
                 # but opening fails with ENXIO. See #16746.
                 echo ""
                 log_info "sudo is needed ONLY to install optional system packages (${pkgs[*]}) via your package manager."
-                log_info "Hermes Agent itself does not require or retain root access."
+                log_info "LexEdge Hermes Agent itself does not require or retain root access."
                 if prompt_yes_no "Install ${description}?" "yes"; then
                     if sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a $install_cmd < /dev/tty; then
                         [ "$need_ripgrep" = true ] && HAS_RIPGREP=true && log_success "ripgrep installed"
@@ -1120,6 +1123,81 @@ show_manual_install_hint() {
 # Installation
 # ============================================================================
 
+# The managed install directory must track the LexEdge repository. A checkout
+# left pointing at the upstream Nous remote (or any other fork) would silently
+# update Hermes from the wrong source -- shipping upstream code under LexEdge
+# branding -- and would never find a LexEdge-only branch. Correct it before
+# fetching. This only ever touches the installer-managed INSTALL_DIR.
+ensure_lexedge_origin() {
+    local current
+    current="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || echo "")"
+
+    case "$current" in
+        "$REPO_URL_HTTPS"|"$REPO_URL_SSH")
+            return 0
+            ;;
+    esac
+
+    if [ -z "$current" ]; then
+        log_info "Setting install remote to $REPO_URL_HTTPS"
+        git -C "$INSTALL_DIR" remote add origin "$REPO_URL_HTTPS" || return 1
+    else
+        log_warn "Install directory tracked $current"
+        log_warn "Repointing it to $REPO_URL_HTTPS"
+        git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL_HTTPS" || return 1
+    fi
+    # A repointed remote still carries the old remote-tracking refs; drop them
+    # so the fetch below resolves against the new origin only.
+    git -C "$INSTALL_DIR" remote prune origin >/dev/null 2>&1 || true
+    return 0
+}
+
+# Writes $INSTALL_DIR/.hermes-bootstrap-complete, which tells the desktop app
+# (apps/desktop/electron/main.cjs isBootstrapComplete()) and the installer
+# (bootstrap.rs hermes_is_installed()) that setup ran successfully.
+#
+# install.ps1 has written this since the Windows installer shipped; the POSIX
+# path never did. The result was that on macOS/Linux hermes_is_installed() was
+# always false: the installer's launcher fast path could never fire, and the
+# desktop kept re-running its legacy first-launch bootstrap after a perfectly
+# good install.
+#
+# Keep the schema in lockstep with install.ps1's Write-BootstrapMarker and
+# main.cjs's validator: schemaVersion 1, and pinnedCommit must be at least 7
+# characters or the desktop rejects the marker.
+write_bootstrap_marker() {
+    if [ ! -d "$INSTALL_DIR" ]; then
+        log_warn "Skipping bootstrap marker: $INSTALL_DIR doesn't exist"
+        return 0
+    fi
+
+    local pinned_commit="$INSTALL_COMMIT"
+    if [ -z "$pinned_commit" ]; then
+        pinned_commit="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+    fi
+    # An invalid marker is worse than none: the desktop would reject it on
+    # every launch and re-run bootstrap anyway, with no clue why.
+    if [ "${#pinned_commit}" -lt 7 ]; then
+        log_warn "Could not resolve the installed commit; skipping bootstrap marker"
+        return 0
+    fi
+
+    local pinned_branch="${BRANCH:-main}"
+    local completed_at
+    completed_at="$(date -u +%Y-%m-%dT%H:%M:%S).000Z"
+
+    # Plain UTF-8, no BOM — Node's JSON.parse rejects a BOM.
+    cat > "$INSTALL_DIR/.hermes-bootstrap-complete" <<MARKER_JSON
+{
+  "schemaVersion": 1,
+  "pinnedCommit": "$pinned_commit",
+  "pinnedBranch": "$pinned_branch",
+  "completedAt": "$completed_at"
+}
+MARKER_JSON
+    log_success "Bootstrap marker written"
+}
+
 clone_repo() {
     log_info "Installing to $INSTALL_DIR..."
 
@@ -1135,6 +1213,26 @@ clone_repo() {
         log_warn "Existing checkout at $INSTALL_DIR has no commits (interrupted clone)."
         log_warn "Moving it aside to $backup_dir before re-cloning."
         mv "$INSTALL_DIR" "$backup_dir"
+    fi
+
+    # A checkout whose history is unrelated to the LexEdge repository can never
+    # be fast-forwarded onto it. This happens when the install came from the
+    # bundled source archive below (git init + one commit) or from a different
+    # fork. Left alone, the update path's `git pull --ff-only` aborts -- and
+    # because the stage body runs under `set +e`, that failure used to be
+    # swallowed and the stage reported success while sitting on stale code.
+    # Move such a checkout aside (never delete) so the fresh-clone path runs.
+    if [ -d "$INSTALL_DIR/.git" ] && git -C "$INSTALL_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+        ensure_lexedge_origin || true
+        if git -C "$INSTALL_DIR" fetch --quiet origin "$BRANCH" >/dev/null 2>&1; then
+            if ! git -C "$INSTALL_DIR" merge-base --is-ancestor HEAD FETCH_HEAD >/dev/null 2>&1; then
+                backup_dir="${INSTALL_DIR}.unrelated-$(date -u +%Y%m%d-%H%M%S)"
+                log_warn "Existing checkout cannot be fast-forwarded from $REPO_URL_HTTPS."
+                log_warn "Its history is unrelated to or has diverged from $BRANCH."
+                log_warn "Moving it aside to $backup_dir and installing a fresh copy."
+                mv "$INSTALL_DIR" "$backup_dir"
+            fi
+        fi
     fi
 
     if [ -d "$INSTALL_DIR" ]; then
@@ -1168,10 +1266,27 @@ clone_repo() {
             # every ref, and this repo carries thousands of auto-generated
             # branches — on a non-single-branch checkout that turns each update
             # into a multi-minute download that can stall the installer.
+            ensure_lexedge_origin || {
+                log_error "Could not point the install directory at $REPO_URL_HTTPS"
+                return 1
+            }
             git remote set-branches origin "$BRANCH" 2>/dev/null || true
-            git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-            git pull --ff-only origin "$BRANCH"
+            # These run under `set +e` (see run_stage), so an unchecked failure
+            # would fall through to "Repository ready" and report ok:true on a
+            # stale checkout. Check every step.
+            if ! git fetch origin "$BRANCH"; then
+                log_error "Could not fetch $BRANCH from $REPO_URL_HTTPS"
+                exit 1
+            fi
+            if ! git checkout "$BRANCH"; then
+                log_error "Could not check out $BRANCH"
+                exit 1
+            fi
+            if ! git pull --ff-only origin "$BRANCH"; then
+                log_error "Could not fast-forward $BRANCH from $REPO_URL_HTTPS"
+                log_error "The install directory is at $(git rev-parse --short HEAD) and was not updated."
+                exit 1
+            fi
 
             if [ -n "$autostash_ref" ]; then
                 local restore_now="yes"
@@ -1435,7 +1550,7 @@ install_deps() {
                     log_success "Build tools installed"
                 else
                     log_info "sudo is needed ONLY to install build tools (build-essential, python3-dev, libffi-dev) via apt."
-                    log_info "Hermes Agent itself does not require or retain root access."
+                    log_info "LexEdge Hermes Agent itself does not require or retain root access."
                     if prompt_yes_no "Install build tools?" "yes"; then
                         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq build-essential python3-dev libffi-dev >/dev/null 2>&1 || true
                         log_success "Build tools installed"
@@ -1672,7 +1787,7 @@ EOF
 
         log_info "hermes not on PATH in non-login shells (common on RHEL-family)"
         PATH_LINE='export PATH="/usr/local/bin:$PATH"'
-        PATH_COMMENT='# Hermes Agent — ensure /usr/local/bin is on PATH (RHEL non-login shells)'
+        PATH_COMMENT='# LexEdge Hermes Agent — ensure /usr/local/bin is on PATH (RHEL non-login shells)'
         for SHELL_CONFIG in "$HOME/.bashrc" "$HOME/.bash_profile"; do
             [ -f "$SHELL_CONFIG" ] || continue
             if ! grep -v '^[[:space:]]*#' "$SHELL_CONFIG" 2>/dev/null \
@@ -1729,7 +1844,7 @@ EOF
         for SHELL_CONFIG in "${SHELL_CONFIGS[@]}"; do
             if ! grep -v '^[[:space:]]*#' "$SHELL_CONFIG" 2>/dev/null | grep -qE 'PATH=.*\.local/bin'; then
                 echo "" >> "$SHELL_CONFIG"
-                echo "# Hermes Agent — ensure ~/.local/bin is on PATH" >> "$SHELL_CONFIG"
+                echo "# LexEdge Hermes Agent — ensure ~/.local/bin is on PATH" >> "$SHELL_CONFIG"
                 echo "$PATH_LINE" >> "$SHELL_CONFIG"
                 log_success "Added ~/.local/bin to PATH in $SHELL_CONFIG"
             fi
@@ -1739,7 +1854,7 @@ EOF
         if [ "$IS_FISH" = "true" ]; then
             if ! grep -q 'fish_add_path.*\.local/bin' "$FISH_CONFIG" 2>/dev/null; then
                 echo "" >> "$FISH_CONFIG"
-                echo "# Hermes Agent — ensure ~/.local/bin is on PATH" >> "$FISH_CONFIG"
+                echo "# LexEdge Hermes Agent — ensure ~/.local/bin is on PATH" >> "$FISH_CONFIG"
                 echo 'fish_add_path "$HOME/.local/bin"' >> "$FISH_CONFIG"
                 log_success "Added ~/.local/bin to PATH in $FISH_CONFIG"
             fi
@@ -1796,7 +1911,7 @@ copy_config_templates() {
     # Create SOUL.md if it doesn't exist (global persona file)
     if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
         cat > "$HERMES_HOME/SOUL.md" << 'SOUL_EOF'
-# Hermes Agent Persona
+# LexEdge Hermes Agent Persona
 
 <!--
 This file defines the agent's personality and tone.
@@ -1914,7 +2029,7 @@ configure_browser_env_from_system_browser() {
 
     {
         echo ""
-        echo "# Hermes Agent browser tools — use the system Chrome/Chromium binary."
+        echo "# LexEdge Hermes Agent browser tools — use the system Chrome/Chromium binary."
         echo "AGENT_BROWSER_EXECUTABLE_PATH=$browser_path"
     } >> "$env_file"
     log_success "Configured browser tools to use $browser_path"
@@ -2636,22 +2751,46 @@ install_desktop() {
     fi
 
     local app=""
+
+    # The packaged app is named after productName in apps/desktop/package.json,
+    # which changes with rebranding ("Hermes" upstream, "LexEdge AI" here). A
+    # hardcoded name makes this stage fail after a perfectly good build, with
+    # "no app was found". Resolve the configured name, keep the legacy names as
+    # fallbacks, and finally accept whatever bundle electron-builder produced.
+    local product_name=""
+    if [ -f "$desktop_dir/package.json" ] && command -v node >/dev/null 2>&1; then
+        product_name="$(node -e "try{var p=require('$desktop_dir/package.json');process.stdout.write((p.build&&p.build.productName)||p.productName||'')}catch(e){}" 2>/dev/null || echo "")"
+    fi
+
+    local cand
     if [ "$OS" = "linux" ]; then
-        if [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
-            app="$desktop_dir/release/linux-unpacked/Hermes"
-        elif [ -x "$desktop_dir/release/linux-unpacked/hermes" ]; then
-            app="$desktop_dir/release/linux-unpacked/hermes"
-        fi
-    else
-        local cand
-        for cand in \
-            "$desktop_dir/release/mac-arm64/Hermes.app" \
-            "$desktop_dir/release/mac/Hermes.app"; do
-            if [ -d "$cand" ]; then
-                app="$cand"
+        for cand in "$product_name" "Hermes" "hermes"; do
+            [ -n "$cand" ] || continue
+            if [ -x "$desktop_dir/release/linux-unpacked/$cand" ]; then
+                app="$desktop_dir/release/linux-unpacked/$cand"
                 break
             fi
         done
+    else
+        for cand in "$product_name" "Hermes"; do
+            [ -n "$cand" ] || continue
+            if [ -d "$desktop_dir/release/mac-arm64/$cand.app" ]; then
+                app="$desktop_dir/release/mac-arm64/$cand.app"
+                break
+            elif [ -d "$desktop_dir/release/mac/$cand.app" ]; then
+                app="$desktop_dir/release/mac/$cand.app"
+                break
+            fi
+        done
+        # Last resort: any .app electron-builder left behind.
+        if [ -z "$app" ]; then
+            for cand in "$desktop_dir"/release/mac-arm64/*.app "$desktop_dir"/release/mac/*.app; do
+                if [ -d "$cand" ]; then
+                    app="$cand"
+                    break
+                fi
+            done
+        fi
     fi
     if [ -z "$app" ]; then
         log_error "Desktop build completed but no app was found under $desktop_dir/release/"
@@ -2804,6 +2943,7 @@ run_stage_body() {
             # clobbered by the container's 'docker' stamp and wrongly blocks
             # 'hermes update' on this host install. See detect_install_method().
             echo "git" > "$INSTALL_DIR/.install_method"
+            write_bootstrap_marker
             ;;
         *)
             log_error "Unknown stage: $stage"
@@ -2888,6 +3028,7 @@ main() {
     # stamp and wrongly blocks 'hermes update' on this host install.
     # See detect_install_method().
     echo "git" > "$INSTALL_DIR/.install_method"
+    write_bootstrap_marker
 }
 
 if [ "$MANIFEST_MODE" = true ]; then

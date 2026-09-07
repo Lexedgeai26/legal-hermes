@@ -210,27 +210,111 @@ pub async fn launch_hermes_desktop(
 /// Walks the well-known electron-builder unpacked-app paths under
 /// `install_root`. Mirrors the resolver in `cmd_gui` (apps/desktop/release/
 /// <os>-unpacked/<exe>).
-pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
-    let release_dir = install_root.join("apps").join("desktop").join("release");
-    let candidates: &[(&str, &str)] = if cfg!(target_os = "windows") {
-        &[
-            ("win-unpacked", "Hermes.exe"),
-            ("win-arm64-unpacked", "Hermes.exe"),
-        ]
-    } else if cfg!(target_os = "macos") {
-        &[
-            ("mac/Hermes.app/Contents/MacOS", "Hermes"),
-            ("mac-arm64/Hermes.app/Contents/MacOS", "Hermes"),
-        ]
-    } else {
-        &[("linux-unpacked", "hermes")]
-    };
-    for (subdir, exe) in candidates {
-        let p = release_dir.join(subdir).join(exe);
-        if p.exists() {
-            return Some(p);
+/// The desktop app's productName lives in `apps/desktop/package.json` and
+/// changes with rebranding — it is "LexEdge AI" on this fork and was "Hermes"
+/// upstream. Resolve it rather than hardcoding a name, because a stale name
+/// makes `hermes_is_installed()` permanently false and the launch hand-off
+/// permanently broken, with no visible error.
+fn desktop_product_name(install_root: &std::path::Path) -> Option<String> {
+    let manifest = install_root
+        .join("apps")
+        .join("desktop")
+        .join("package.json");
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    value
+        .get("build")
+        .and_then(|build| build.get("productName"))
+        .and_then(|name| name.as_str())
+        .or_else(|| value.get("productName").and_then(|name| name.as_str()))
+        .map(str::to_string)
+        .filter(|name| !name.trim().is_empty())
+}
+
+/// macOS last resort: whatever single `.app` electron-builder actually left
+/// behind, so an unexpected product name still resolves.
+#[cfg(target_os = "macos")]
+fn discover_macos_bundle_exe(dir: &std::path::Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("app") || !path.is_dir() {
+            continue;
+        }
+        let macos_dir = path.join("Contents").join("MacOS");
+        // Prefer the executable named after the bundle, else the first file.
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            let named = macos_dir.join(stem);
+            if named.is_file() {
+                return Some(named);
+            }
+        }
+        if let Ok(inner) = std::fs::read_dir(&macos_dir) {
+            for candidate in inner.flatten() {
+                if candidate.path().is_file() {
+                    return Some(candidate.path());
+                }
+            }
         }
     }
+    None
+}
+
+pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
+    let release_dir = install_root.join("apps").join("desktop").join("release");
+
+    // Configured name first, then the legacy upstream name so an older install
+    // still resolves.
+    let mut names: Vec<String> = Vec::new();
+    if let Some(configured) = desktop_product_name(install_root) {
+        names.push(configured);
+    }
+    for legacy in ["Hermes", "hermes"] {
+        if !names.iter().any(|n| n == legacy) {
+            names.push(legacy.to_string());
+        }
+    }
+
+    for name in &names {
+        let candidates: Vec<PathBuf> = if cfg!(target_os = "windows") {
+            vec![
+                release_dir.join("win-unpacked").join(format!("{name}.exe")),
+                release_dir
+                    .join("win-arm64-unpacked")
+                    .join(format!("{name}.exe")),
+            ]
+        } else if cfg!(target_os = "macos") {
+            vec![
+                release_dir
+                    .join("mac")
+                    .join(format!("{name}.app"))
+                    .join("Contents")
+                    .join("MacOS")
+                    .join(name),
+                release_dir
+                    .join("mac-arm64")
+                    .join(format!("{name}.app"))
+                    .join("Contents")
+                    .join("MacOS")
+                    .join(name),
+            ]
+        } else {
+            vec![release_dir.join("linux-unpacked").join(name)]
+        };
+        for candidate in candidates {
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    for subdir in ["mac-arm64", "mac"] {
+        if let Some(found) = discover_macos_bundle_exe(&release_dir.join(subdir)) {
+            return Some(found);
+        }
+    }
+
     None
 }
 
@@ -238,7 +322,7 @@ pub(crate) fn resolve_hermes_desktop_app(install_root: &std::path::Path) -> Opti
     let exe = resolve_hermes_desktop_exe(install_root)?;
     #[cfg(target_os = "macos")]
     {
-        // .../Hermes.app/Contents/MacOS/Hermes -> .../Hermes.app
+        // .../<Product>.app/Contents/MacOS/<Product> -> .../<Product>.app
         let app = exe.parent()?.parent()?.parent()?.to_path_buf();
         if app.extension().and_then(|e| e.to_str()) == Some("app") && app.is_dir() {
             return Some(app);
@@ -891,6 +975,74 @@ mod tests {
             assert_eq!(resolved, expected);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The packaged app is named after productName in apps/desktop/package.json.
+    /// That name was rebranded from "Hermes" to "LexEdge AI"; the resolver used
+    /// to hardcode "Hermes", so a correctly-built app was invisible — which made
+    /// hermes_is_installed() permanently false and broke the launch hand-off
+    /// with no error anywhere.
+    #[test]
+    fn resolve_desktop_app_follows_the_configured_product_name() {
+        let root = unique_tmp_dir("app-productname");
+        let desktop = root.join("apps").join("desktop");
+        std::fs::create_dir_all(&desktop).unwrap();
+        std::fs::write(
+            desktop.join("package.json"),
+            br#"{"name":"lexedge-ai","build":{"productName":"LexEdge AI"}}"#,
+        )
+        .unwrap();
+
+        let name = "LexEdge AI";
+        let release = desktop.join("release");
+        let exe_dir = if cfg!(target_os = "macos") {
+            release
+                .join("mac-arm64")
+                .join(format!("{name}.app"))
+                .join("Contents")
+                .join("MacOS")
+        } else if cfg!(target_os = "windows") {
+            release.join("win-unpacked")
+        } else {
+            release.join("linux-unpacked")
+        };
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        let exe_name = if cfg!(target_os = "windows") {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        };
+        std::fs::write(exe_dir.join(&exe_name), b"stub").unwrap();
+
+        let resolved =
+            resolve_hermes_desktop_exe(&root).expect("must resolve the rebranded desktop app");
+        assert!(
+            resolved.to_string_lossy().contains("LexEdge AI"),
+            "resolved {resolved:?} should be the configured product"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An install produced before the rebrand must keep resolving.
+    #[test]
+    fn resolve_desktop_app_still_finds_the_legacy_name() {
+        let root = unique_tmp_dir("app-legacy");
+        let expected = make_release_tree(&root);
+        // No package.json at all — the legacy fallback must carry it.
+        assert_eq!(
+            resolve_hermes_desktop_exe(&root).expect("legacy layout must resolve"),
+            expected_exe(&expected)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn expected_exe(app_or_exe: &std::path::Path) -> PathBuf {
+        #[cfg(target_os = "macos")]
+        {
+            return app_or_exe.join("Contents").join("MacOS").join("Hermes");
+        }
+        #[allow(unreachable_code)]
+        app_or_exe.to_path_buf()
     }
 
     #[test]

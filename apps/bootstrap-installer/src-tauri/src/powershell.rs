@@ -354,4 +354,30 @@ info line
             "unexpected powershell path: {normalized}"
         );
     }
+
+    /// Golden fixture captured from a real `install.sh --manifest` run. This is
+    /// the contract between the installer and the install script: if the script
+    /// changes shape, this fails rather than the installer failing at runtime.
+    #[test]
+    fn real_install_script_manifest_parses() {
+        let captured = include_str!("../test-fixtures/install-manifest.v1.json");
+        let manifest = parse_manifest(captured).expect("captured manifest must parse");
+
+        assert_eq!(manifest.protocol_version, Some(1));
+        assert_eq!(manifest.stages.len(), 10);
+        assert_eq!(manifest.stages.first().unwrap().name, "prerequisites");
+        assert_eq!(manifest.stages.last().unwrap().name, "complete");
+
+        // Stage titles are user-visible, so they carry the product name.
+        let repository = manifest
+            .stages
+            .iter()
+            .find(|s| s.name == "repository")
+            .expect("repository stage");
+        assert_eq!(repository.title, "Download LexEdge Hermes Agent");
+        assert!(
+            !manifest.stages.iter().any(|s| s.title.contains("Nous")),
+            "no stage title may name the upstream project as the product"
+        );
+    }
 }
