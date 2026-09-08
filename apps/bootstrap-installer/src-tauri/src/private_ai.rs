@@ -106,6 +106,13 @@ pub struct LegalModelProfile {
     pub operational_context_tokens: u64,
     pub target_tps: f64,
     pub legal_benchmark: LegalBenchmark,
+    /// Registry manifest digest the installed model must match exactly. When
+    /// present, provisioning fails closed on any other artifact under this
+    /// tag. Absent only in catalogues that predate digest pinning.
+    #[serde(default)]
+    pub expected_digest: Option<String>,
+    #[serde(default)]
+    pub expected_size_bytes: Option<u64>,
 }
 
 fn default_true() -> bool {
@@ -690,6 +697,8 @@ mod tests {
             download_size_gb: 5.0,
             operational_context_tokens: 8192,
             target_tps: 10.0,
+            expected_digest: None,
+            expected_size_bytes: None,
             legal_benchmark: LegalBenchmark {
                 approved: true,
                 score: legal_score,

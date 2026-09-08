@@ -343,7 +343,7 @@ pub fn read_runtime_config(paths: &ManagedRuntimePaths) -> Result<RuntimeConfig,
 
 /// Write via a sibling temp file and rename. A crash mid-write leaves either
 /// the old file or the new one, never a truncated one.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "Target path has no parent directory".to_string())?;

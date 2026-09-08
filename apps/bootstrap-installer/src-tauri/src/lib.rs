@@ -10,7 +10,10 @@
 
 mod bootstrap;
 mod catalogue;
+mod component_manifest;
+mod download;
 mod events;
+mod extract;
 mod hardware;
 mod install_script;
 mod llmfit;
@@ -19,6 +22,7 @@ mod ollama_api;
 mod paths;
 mod private_ai;
 mod private_ai_flow;
+mod provision;
 mod runtime;
 mod signed_envelope;
 mod update;
@@ -80,6 +84,13 @@ where
 /// without lifetime gymnastics.
 pub struct AppState {
     pub bootstrap: Mutex<Option<bootstrap::BootstrapHandle>>,
+    /// In-flight Private AI provisioning run, if any.
+    pub private_ai: Mutex<Option<provision::ProvisionHandle>>,
+    /// The managed Ollama process started by provisioning. Held for the life
+    /// of the installer so validation can talk to it; kill_on_drop stops it
+    /// when the installer exits. The desktop app supervises its own copy from
+    /// runtime.json afterwards.
+    pub managed_runtime: Mutex<Option<tokio::process::Child>>,
     /// How this process was launched (install vs update). Immutable for the
     /// lifetime of the process; read by the `get_mode` command.
     pub mode: AppMode,
@@ -89,6 +100,8 @@ impl AppState {
     fn new(mode: AppMode) -> Self {
         Self {
             bootstrap: Mutex::new(None),
+            private_ai: Mutex::new(None),
+            managed_runtime: Mutex::new(None),
             mode,
         }
     }
@@ -195,6 +208,10 @@ pub fn run() {
             private_ai::recommend_private_ai_models,
             private_ai::validate_private_ai_runtime_config,
             private_ai_flow::analyze_private_ai_options,
+            // Private AI provisioning: download, install, start, pull, validate.
+            provision::start_private_ai_provisioning,
+            provision::cancel_private_ai_provisioning,
+            provision::get_private_ai_provisioning_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LexEdge Hermes Agent Setup");

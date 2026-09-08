@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "dev-2026-09-08",
+  "channel": "development",
+  "issuedAt": "2026-09-08T00:00:00Z",
+  "expiresAt": "2099-01-01T00:00:00Z",
+  "components": [
+    {
+      "id": "ollama",
+      "version": "0.33.3",
+      "platform": "macos",
+      "architecture": "arm64",
+      "url": "https://github.com/ollama/ollama/releases/download/v0.33.3/ollama-darwin.tgz",
+      "sizeBytes": 159236337,
+      "sha256": "342db03df80bb9db84ff64246031bd5f70c09b59ff52fa5cc9aaae3476cc4a9d",
+      "license": "MIT",
+      "noticePath": "notices/ollama-LICENSE.txt",
+      "minimumOsVersion": "11.0",
+      "authenticodeRequired": false,
+      "rollbackVersion": null
+    },
+    {
+      "id": "ollama",
+      "version": "0.33.3",
+      "platform": "macos",
+      "architecture": "x64",
+      "url": "https://github.com/ollama/ollama/releases/download/v0.33.3/ollama-darwin.tgz",
+      "sizeBytes": 159236337,
+      "sha256": "342db03df80bb9db84ff64246031bd5f70c09b59ff52fa5cc9aaae3476cc4a9d",
+      "license": "MIT",
+      "noticePath": "notices/ollama-LICENSE.txt",
+      "minimumOsVersion": "11.0",
+      "authenticodeRequired": false,
+      "rollbackVersion": null
+    },
+    {
+      "id": "ollama",
+      "version": "0.33.3",
+      "platform": "windows",
+      "architecture": "x64",
+      "url": "https://github.com/ollama/ollama/releases/download/v0.33.3/ollama-windows-amd64.zip",
+      "sizeBytes": 1469175900,
+      "sha256": "52cb36a62e7e501f61514f60212dec7117b6c098811357585e02fffe32d2fcd7",
+      "license": "MIT",
+      "noticePath": "notices/ollama-LICENSE.txt",
+      "minimumOsVersion": "10.0.19041",
+      "authenticodeRequired": true,
+      "rollbackVersion": null
+    },
+    {
+      "id": "ollama",
+      "version": "0.33.3",
+      "platform": "windows",
+      "architecture": "arm64",
+      "url": "https://github.com/ollama/ollama/releases/download/v0.33.3/ollama-windows-arm64.zip",
+      "sizeBytes": 210648637,
+      "sha256": "98b9ddaab6baece0418c6d1231526eb1e4e66944985e0a8eeb7d6171bcd7b6d8",
+      "license": "MIT",
+      "noticePath": "notices/ollama-LICENSE.txt",
+      "minimumOsVersion": "10.0.19041",
+      "authenticodeRequired": true,
+      "rollbackVersion": null
+    }
+  ]
+}

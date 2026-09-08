@@ -2,46 +2,66 @@
   "schemaVersion": 1,
   "notAfter": "2099-01-01T00:00:00Z",
   "disabledProfiles": [],
-  "embeddingModel": "embedding-dev:300m",
+  "embeddingModel": "embeddinggemma:300m",
   "embeddingDimensions": 768,
+  "embeddingExpectedDigest": "85462619ee721b466c5927d109d4cb765861907d5417b9109caebc4e614679f1",
+  "embeddingExpectedSizeBytes": 621875501,
   "catalogue": {
     "schemaVersion": 1,
     "id": "legal-desktop-dev",
-    "version": "0.0.0-dev",
+    "version": "0.0.1-dev",
     "profiles": [
       {
-        "id": "legal-standard",
-        "friendlyName": "Legal Standard",
-        "ollamaModel": "legal-dev:9b",
-        "llmfitAliases": ["legal-dev-9b", "legal dev 9b"],
-        "minimumRamGb": 16,
-        "recommendedRamGb": 24,
+        "id": "legal-standard-dev",
+        "friendlyName": "Legal Standard (development)",
+        "ollamaModel": "qwen2.5:1.5b",
+        "llmfitAliases": [
+          "qwen2.5-1.5b"
+        ],
+        "minimumRamGb": 6,
+        "recommendedRamGb": 8,
         "minimumVramGb": 0,
         "requiresGpu": false,
-        "downloadSizeGb": 5.5,
-        "operationalContextTokens": 16384,
-        "targetTps": 20,
-        "legalBenchmark": { "approved": true, "score": 82, "version": "dev-1" }
-      },
-      {
-        "id": "legal-compact",
-        "friendlyName": "Legal Compact",
-        "ollamaModel": "legal-dev:3b",
-        "llmfitAliases": ["legal-dev-3b"],
-        "minimumRamGb": 8,
-        "recommendedRamGb": 12,
-        "minimumVramGb": 0,
-        "requiresGpu": false,
-        "downloadSizeGb": 2.1,
+        "downloadSizeGb": 0.99,
         "operationalContextTokens": 8192,
-        "targetTps": 25,
-        "legalBenchmark": { "approved": true, "score": 74, "version": "dev-1" }
+        "targetTps": 20,
+        "legalBenchmark": {
+          "approved": true,
+          "score": 70,
+          "version": "dev-1"
+        },
+        "expectedDigest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",
+        "expectedSizeBytes": 986061405
       },
       {
-        "id": "legal-large",
-        "friendlyName": "Legal Large",
+        "id": "legal-compact-dev",
+        "friendlyName": "Legal Compact (development)",
+        "ollamaModel": "qwen2.5:0.5b",
+        "llmfitAliases": [
+          "qwen2.5-0.5b"
+        ],
+        "minimumRamGb": 4,
+        "recommendedRamGb": 6,
+        "minimumVramGb": 0,
+        "requiresGpu": false,
+        "downloadSizeGb": 0.4,
+        "operationalContextTokens": 8192,
+        "targetTps": 30,
+        "legalBenchmark": {
+          "approved": true,
+          "score": 60,
+          "version": "dev-1"
+        },
+        "expectedDigest": "a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67",
+        "expectedSizeBytes": 397820829
+      },
+      {
+        "id": "legal-large-dev",
+        "friendlyName": "Legal Large (development)",
         "ollamaModel": "legal-dev:27b",
-        "llmfitAliases": ["legal-dev-27b"],
+        "llmfitAliases": [
+          "legal-dev-27b"
+        ],
         "minimumRamGb": 48,
         "recommendedRamGb": 64,
         "minimumVramGb": 24,
@@ -49,7 +69,11 @@
         "downloadSizeGb": 17.0,
         "operationalContextTokens": 32768,
         "targetTps": 12,
-        "legalBenchmark": { "approved": true, "score": 88, "version": "dev-1" }
+        "legalBenchmark": {
+          "approved": true,
+          "score": 88,
+          "version": "dev-1"
+        }
       }
     ]
   }

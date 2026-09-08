@@ -18,7 +18,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::validation::{RuntimeProbe, StreamSample};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Small control-plane calls (version, tags, ps) must answer quickly.
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Streams (pulls, generation) have no total cap — a multi-GB pull on a slow
+/// line is legitimate — but must keep producing bytes. reqwest's client-wide
+/// `timeout()` is a TOTAL cap including the body, which is exactly wrong for
+/// a pull; it is deliberately not set.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Non-streaming inference calls: model load plus a short completion.
+const INFERENCE_TIMEOUT: Duration = Duration::from_secs(300);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Installed size may differ slightly from the catalogue figure across Ollama
 /// releases; a wider drift means we did not get the artifact we expected.
@@ -140,15 +148,49 @@ fn sanitize_pull_error(raw: &str) -> String {
 // Installed-model verification
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledModel {
-    #[serde(alias = "name", alias = "model")]
     pub name: String,
-    #[serde(default)]
     pub digest: String,
-    #[serde(default)]
     pub size: u64,
+}
+
+/// Ollama's `/api/tags` and `/api/ps` return BOTH `name` and `model` on every
+/// entry (identical values). A serde alias covering both keys sees the second
+/// one as a duplicate field and rejects the whole response — which only shows
+/// up once at least one model is installed. Accept either, prefer `name`.
+#[derive(Debug, Deserialize)]
+struct RawModel {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    digest: String,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    size_vram: u64,
+}
+
+impl RawModel {
+    fn tag(&self) -> Option<String> {
+        self.name
+            .clone()
+            .or_else(|| self.model.clone())
+            .filter(|s| !s.trim().is_empty())
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledModel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = RawModel::deserialize(deserializer)?;
+        let name = raw
+            .tag()
+            .ok_or_else(|| serde::de::Error::custom("model entry has no name"))?;
+        Ok(InstalledModel { name, digest: raw.digest, size: raw.size })
+    }
 }
 
 /// The expected identity of a model, taken from the signed catalogue.
@@ -226,7 +268,7 @@ impl OllamaClient {
             return Err("The managed runtime URL must point at loopback".to_string());
         }
         let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(Duration::from_secs(10))
             // Never route loopback inference through a proxy (PRD 23).
             .no_proxy()
             .build()
@@ -279,8 +321,13 @@ impl OllamaClient {
         let mut tracker = PullTracker::new();
         let mut buffer = Vec::new();
         let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|_| "The model download was interrupted".to_string())?;
+        loop {
+            let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+                Ok(Some(Ok(chunk))) => chunk,
+                Ok(Some(Err(_))) => return Err("The model download was interrupted".to_string()),
+                Ok(None) => break,
+                Err(_) => return Err("The model download stalled".to_string()),
+            };
             buffer.extend_from_slice(&chunk);
             while let Some(position) = buffer.iter().position(|b| *b == b'\n') {
                 let line: Vec<u8> = buffer.drain(..=position).collect();
@@ -304,6 +351,7 @@ impl OllamaClient {
         let response = self
             .client
             .get(self.url("/api/tags"))
+            .timeout(CONTROL_TIMEOUT)
             .send()
             .await
             .map_err(|_| "Unable to list installed models".to_string())?;
@@ -404,8 +452,13 @@ impl RuntimeProbe for OllamaClient {
         let mut first_token_at: Option<Instant> = None;
         let mut buffer = Vec::new();
         let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|_| "The response stream was interrupted".to_string())?;
+        loop {
+            let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+                Ok(Some(Ok(chunk))) => chunk,
+                Ok(Some(Err(_))) => return Err("The response stream was interrupted".to_string()),
+                Ok(None) => break,
+                Err(_) => return Err("The model stopped responding".to_string()),
+            };
             buffer.extend_from_slice(&chunk);
             while let Some(position) = buffer.iter().position(|b| *b == b'\n') {
                 let line: Vec<u8> = buffer.drain(..=position).collect();
@@ -452,6 +505,7 @@ impl RuntimeProbe for OllamaClient {
         let response = self
             .client
             .post(self.url("/api/generate"))
+            .timeout(INFERENCE_TIMEOUT)
             .json(&serde_json::json!({
                 "model": model,
                 "prompt": prompt,
@@ -483,6 +537,7 @@ impl RuntimeProbe for OllamaClient {
         let response = self
             .client
             .post(self.url("/api/embed"))
+            .timeout(INFERENCE_TIMEOUT)
             .json(&serde_json::json!({ "model": model, "input": text }))
             .send()
             .await
@@ -506,20 +561,14 @@ impl RuntimeProbe for OllamaClient {
         #[derive(Deserialize)]
         struct Running {
             #[serde(default)]
-            models: Vec<RunningModel>,
+            models: Vec<RawModel>,
         }
-        #[derive(Deserialize)]
-        struct RunningModel {
-            #[serde(alias = "name", alias = "model")]
-            name: String,
-            #[serde(default)]
-            size: u64,
-            #[serde(default, alias = "size_vram")]
-            size_vram: u64,
-        }
-        let response = self.client.get(self.url("/api/ps")).send().await.ok()?;
+        let response = self.client.get(self.url("/api/ps")).timeout(CONTROL_TIMEOUT).send().await.ok()?;
         let running = response.json::<Running>().await.ok()?;
-        let entry = running.models.iter().find(|m| m.name == model)?;
+        let entry = running
+            .models
+            .iter()
+            .find(|m| m.tag().as_deref() == Some(model))?;
         Some(classify_execution_mode(entry.size, entry.size_vram))
     }
 }
@@ -784,6 +833,34 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("empty"), "{err}");
+    }
+
+    /// Verbatim shape of a real `/api/tags` entry: both `name` and `model`
+    /// present, plus fields we ignore. This is the payload that broke the
+    /// first live provisioning run.
+    #[test]
+    fn installed_model_list_parses_real_ollama_tags_payload() {
+        let body = r#"{"models":[{"name":"qwen2.5:0.5b","model":"qwen2.5:0.5b",
+            "modified_at":"2026-09-08T08:16:57.4Z","size":397821319,
+            "digest":"a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67",
+            "details":{"parent_model":"","format":"gguf","family":"qwen2",
+            "families":["qwen2"],"parameter_size":"494.03M","quantization_level":"Q4_K_M"}}]}"#;
+        #[derive(Deserialize)]
+        struct Tags {
+            models: Vec<InstalledModel>,
+        }
+        let tags: Tags = serde_json::from_str(body).expect("real payload must parse");
+        assert_eq!(tags.models.len(), 1);
+        assert_eq!(tags.models[0].name, "qwen2.5:0.5b");
+        assert_eq!(tags.models[0].size, 397821319);
+        assert!(tags.models[0].digest.starts_with("a8b0c515"));
+
+        // Older shape with only `model`, and an entry with neither, are handled.
+        let only_model: InstalledModel = serde_json::from_str(r#"{"model":"x:1b","digest":"d","size":1}"#).unwrap();
+        assert_eq!(only_model.name, "x:1b");
+        assert!(serde_json::from_str::<InstalledModel>(r#"{"digest":"d","size":1}"#).is_err());
+        // An empty list still parses (the case that hid the bug).
+        assert!(serde_json::from_str::<Tags>(r#"{"models":[]}"#).unwrap().models.is_empty());
     }
 
     #[test]

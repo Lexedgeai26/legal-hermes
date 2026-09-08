@@ -65,6 +65,7 @@ export type Route =
   | 'privacy'
   | 'analysis'
   | 'progress'
+  | 'provision'
   | 'success'
   | 'failure'
 
@@ -158,6 +159,129 @@ export interface PrivateAiAnalysis {
 }
 
 // ---------------------------------------------------------------------------
+// Private AI provisioning — mirrors src-tauri/src/provision.rs
+// ---------------------------------------------------------------------------
+
+export type ProvisionStageState = 'running' | 'succeeded' | 'skipped' | 'failed'
+
+export interface ProvisionStage {
+  name: string
+  title: string
+  state: ProvisionStageState | null
+  detail?: string
+  error?: string
+}
+
+export interface ValidationCheck {
+  id: string
+  title: string
+  status: 'passed' | 'failed' | 'skipped'
+  detail: string
+}
+
+export interface ValidationReport {
+  passed: boolean
+  checks: ValidationCheck[]
+  metrics: {
+    runtimeStartupMs: number | null
+    modelLoadMs: number | null
+    timeToFirstTokenMs: number | null
+    tokensPerSecond: number | null
+    embeddingLatencyMs: number | null
+    executionMode: string | null
+  }
+  warnings: string[]
+  suggestedSmallerProfile: string | null
+  selectedGenerationModel: string
+  selectedEmbeddingModel: string
+}
+
+export interface RuntimeConfigSummary {
+  ollama: { baseUrl: string; runtimeVersion: string }
+  models: { profileId: string; generation: string; embedding: string; contextTokens: number }
+}
+
+export interface ProvisionModel {
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled'
+  stages: Record<string, ProvisionStage>
+  stageOrder: string[]
+  currentStage: string | null
+  progress: Record<string, { fraction: number; detail: string }>
+  error: string | null
+  report: ValidationReport | null
+  config: RuntimeConfigSummary | null
+}
+
+const PROVISION_INITIAL: ProvisionModel = {
+  status: 'idle',
+  stages: {},
+  stageOrder: [],
+  currentStage: null,
+  progress: {},
+  error: null,
+  report: null,
+  config: null
+}
+
+export const $provision = atom<ProvisionModel>(PROVISION_INITIAL)
+
+type PrivateAiEvent =
+  | { type: 'manifest'; stages: Array<{ name: string; title: string }> }
+  | { type: 'stage'; name: string; state: ProvisionStageState; detail?: string; error?: string }
+  | { type: 'progress'; stage: string; fraction: number; detail: string }
+  | { type: 'complete'; report: ValidationReport; config: RuntimeConfigSummary }
+  | { type: 'failed'; stage?: string; error: string; resumable: boolean }
+
+let unlistenPrivateAi: UnlistenFn | null = null
+
+async function subscribePrivateAi(): Promise<void> {
+  if (unlistenPrivateAi) return
+  unlistenPrivateAi = await listen<PrivateAiEvent>('private-ai', (event) => {
+    const payload = event.payload
+    const cur = $provision.get()
+    switch (payload.type) {
+      case 'manifest': {
+        const stages: Record<string, ProvisionStage> = {}
+        const order: string[] = []
+        for (const s of payload.stages) {
+          stages[s.name] = { name: s.name, title: s.title, state: null }
+          order.push(s.name)
+        }
+        $provision.set({ ...PROVISION_INITIAL, status: 'running', stages, stageOrder: order })
+        break
+      }
+      case 'stage': {
+        const existing = cur.stages[payload.name]
+        if (!existing) break
+        $provision.set({
+          ...cur,
+          stages: {
+            ...cur.stages,
+            [payload.name]: { ...existing, state: payload.state, detail: payload.detail, error: payload.error }
+          },
+          currentStage: payload.state === 'running' ? payload.name : cur.currentStage
+        })
+        break
+      }
+      case 'progress':
+        $provision.set({
+          ...cur,
+          progress: { ...cur.progress, [payload.stage]: { fraction: payload.fraction, detail: payload.detail } }
+        })
+        break
+      case 'complete':
+        $provision.set({ ...cur, status: 'completed', currentStage: null, report: payload.report, config: payload.config })
+        break
+      case 'failed': {
+        const cancelled = /cancelled/i.test(payload.error)
+        $provision.set({ ...cur, status: cancelled ? 'cancelled' : 'failed', currentStage: null, error: payload.error })
+        break
+      }
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Tauri event subscription
 // ---------------------------------------------------------------------------
 
@@ -219,6 +343,8 @@ export async function initialize(): Promise<void> {
   } catch (err) {
     console.warn('failed to fetch installer paths', err)
   }
+
+  await subscribePrivateAi()
 
   unlisten = await listen<BootstrapEvent>('bootstrap', (event) => {
     const payload = event.payload
@@ -284,8 +410,18 @@ export async function initialize(): Promise<void> {
         // hand-off — the installer relaunches the desktop and exits within a
         // few hundred ms, so routing to success just flashes that screen
         // before the window closes. Stay on progress until we exit.
+        //
+        // Private AI is additive: it starts only after the base install has
+        // succeeded, so a Private AI failure can never take the base install
+        // down with it.
         if ($mode.get() !== 'update') {
-          $route.set('success')
+          const profileId = $selectedProfileId.get()
+          if ($privateAiChoice.get() === 'private' && profileId) {
+            $route.set('provision')
+            void startProvisioning(profileId)
+          } else {
+            $route.set('success')
+          }
         }
         break
       case 'failed':
@@ -399,4 +535,46 @@ export async function analyzePrivateAi(): Promise<void> {
 
 export function selectProfile(profileId: string): void {
   $selectedProfileId.set(profileId)
+}
+
+// ---------------------------------------------------------------------------
+// Private AI provisioning actions
+// ---------------------------------------------------------------------------
+
+export async function startProvisioning(profileId: string): Promise<void> {
+  $provision.set({ ...PROVISION_INITIAL, status: 'running' })
+  $route.set('provision')
+  try {
+    await invoke('start_private_ai_provisioning', { profileId })
+  } catch (err) {
+    $provision.set({
+      ...$provision.get(),
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
+}
+
+export async function cancelProvisioning(): Promise<void> {
+  await invoke('cancel_private_ai_provisioning')
+}
+
+/// Resume from the failed stage. Every stage is idempotent on the Rust side,
+/// so this is a plain restart with the same profile.
+export async function retryProvisioning(): Promise<void> {
+  const profileId = $selectedProfileId.get()
+  if (!profileId) return
+  await startProvisioning(profileId)
+}
+
+/// Give up on Private AI for now. The base install is already complete and
+/// untouched; the desktop app runs with a cloud provider until this is
+/// revisited from Settings.
+export function skipPrivateAi(): void {
+  $privateAiChoice.set('cloud')
+  $route.set('success')
+}
+
+export function continueToSuccess(): void {
+  $route.set('success')
 }

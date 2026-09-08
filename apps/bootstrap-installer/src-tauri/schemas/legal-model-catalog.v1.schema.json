@@ -4,18 +4,36 @@
   "title": "LexEdge Legal Model Catalogue",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "id", "version", "profiles"],
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "profiles"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "id": { "type": "string", "minLength": 1 },
-    "version": { "type": "string", "minLength": 1 },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
     "profiles": {
       "type": "array",
-      "items": { "$ref": "#/$defs/profile" }
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
     }
   },
   "$defs": {
-    "nonNegativeNumber": { "type": "number", "minimum": 0 },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
@@ -31,33 +49,100 @@
         "legalBenchmark"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "friendlyName": { "type": "string", "minLength": 1 },
-        "ollamaModel": { "type": "string", "minLength": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "friendlyName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ollamaModel": {
+          "type": "string",
+          "minLength": 1
+        },
         "llmfitAliases": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "uniqueItems": true
         },
-        "enabled": { "type": "boolean", "default": true },
-        "retired": { "type": "boolean", "default": false },
-        "minimumRamGb": { "$ref": "#/$defs/nonNegativeNumber" },
-        "recommendedRamGb": { "$ref": "#/$defs/nonNegativeNumber" },
-        "minimumVramGb": { "$ref": "#/$defs/nonNegativeNumber" },
-        "requiresGpu": { "type": "boolean", "default": false },
-        "requiredBackend": { "type": ["string", "null"], "minLength": 1 },
-        "downloadSizeGb": { "$ref": "#/$defs/nonNegativeNumber" },
-        "operationalContextTokens": { "type": "integer", "minimum": 1 },
-        "targetTps": { "$ref": "#/$defs/nonNegativeNumber" },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "retired": {
+          "type": "boolean",
+          "default": false
+        },
+        "minimumRamGb": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "recommendedRamGb": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "minimumVramGb": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "requiresGpu": {
+          "type": "boolean",
+          "default": false
+        },
+        "requiredBackend": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "downloadSizeGb": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "operationalContextTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "targetTps": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
         "legalBenchmark": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["approved", "score", "version"],
+          "required": [
+            "approved",
+            "score",
+            "version"
+          ],
           "properties": {
-            "approved": { "type": "boolean" },
-            "score": { "type": "number", "minimum": 0, "maximum": 100 },
-            "version": { "type": "string", "minLength": 1 }
+            "approved": {
+              "type": "boolean"
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
           }
+        },
+        "expectedDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(sha256:)?[a-fA-F0-9]{64}$"
+        },
+        "expectedSizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
         }
       }
     }

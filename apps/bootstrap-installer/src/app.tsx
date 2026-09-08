@@ -5,6 +5,7 @@ import Welcome from './routes/welcome'
 import Privacy from './routes/privacy'
 import Analysis from './routes/analysis'
 import Progress from './routes/progress'
+import Provision from './routes/provision'
 import Success from './routes/success'
 import Failure from './routes/failure'
 
@@ -33,6 +34,7 @@ export default function App() {
         {route === 'privacy' && <Privacy />}
         {route === 'analysis' && <Analysis />}
         {route === 'progress' && <Progress bootstrap={bootstrap} />}
+        {route === 'provision' && <Provision />}
         {route === 'success' && <Success />}
         {route === 'failure' && <Failure bootstrap={bootstrap} />}
       </main>

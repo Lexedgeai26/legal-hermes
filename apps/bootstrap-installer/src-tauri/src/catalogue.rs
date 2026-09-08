@@ -41,6 +41,10 @@ pub struct SignedCatalogue {
     pub embedding_model: String,
     #[serde(default)]
     pub embedding_dimensions: usize,
+    #[serde(default)]
+    pub embedding_expected_digest: Option<String>,
+    #[serde(default)]
+    pub embedding_expected_size_bytes: Option<u64>,
     pub catalogue: LegalModelCatalogue,
 }
 
@@ -50,6 +54,8 @@ pub struct LoadedCatalogue {
     pub catalogue: LegalModelCatalogue,
     pub embedding_model: String,
     pub embedding_dimensions: usize,
+    pub embedding_expected_digest: Option<String>,
+    pub embedding_expected_size_bytes: Option<u64>,
 }
 
 /// Keys this build trusts. Rotation is additive: ship the new key alongside the
@@ -105,6 +111,8 @@ pub fn load_signed_catalogue(
         catalogue,
         embedding_model: signed.embedding_model,
         embedding_dimensions: signed.embedding_dimensions,
+        embedding_expected_digest: signed.embedding_expected_digest,
+        embedding_expected_size_bytes: signed.embedding_expected_size_bytes,
     })
 }
 
@@ -132,7 +140,7 @@ pub fn development_catalogue(now_rfc3339: &str) -> Result<LoadedCatalogue, Strin
 
 /// Lexicographic comparison is correct for RFC 3339 UTC timestamps of equal
 /// shape, which is what we mint. Anything malformed fails closed.
-fn expiry_is_valid(not_after: &str, now: &str) -> bool {
+pub(crate) fn expiry_is_valid(not_after: &str, now: &str) -> bool {
     if not_after.len() != 20 || !not_after.ends_with('Z') {
         return false;
     }
