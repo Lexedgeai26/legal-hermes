@@ -300,9 +300,45 @@ pub async fn spawn_managed_runtime(
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
-    command
+    let mut child = command
         .spawn()
-        .map_err(|_| "Unable to start the managed Private AI runtime".to_string())
+        .map_err(|_| "Unable to start the managed Private AI runtime".to_string())?;
+    drain_runtime_output(&mut child);
+    Ok(child)
+}
+
+/// Ollama logs every request. With stdout/stderr piped and nobody reading,
+/// the 64 KB pipe buffer fills and the runtime blocks on write — a silent
+/// freeze that only appears in a long session. Drain both pipes into the
+/// installer's log at debug level, line-bounded so a runaway line cannot
+/// grow memory. Ollama's default logging carries request paths and timings,
+/// not prompt or document content, so nothing sensitive is copied.
+fn drain_runtime_output(child: &mut Child) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    const MAX_LINE: usize = 4096;
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                tracing::debug!(target: "ollama.stdout", "{}", truncate(&line, MAX_LINE));
+            }
+        });
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                tracing::debug!(target: "ollama.stderr", "{}", truncate(&line, MAX_LINE));
+            }
+        });
+    }
+}
+
+fn truncate(line: &str, max: usize) -> &str {
+    match line.char_indices().nth(max) {
+        Some((idx, _)) => &line[..idx],
+        None => line,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -615,6 +651,42 @@ mod tests {
         std::fs::write(paths.executable(), b"#!/bin/sh\nexit 0\n").unwrap();
         let err = spawn_managed_runtime(&paths, 11_434).await.unwrap_err();
         assert!(err.contains("ownership marker"), "got: {err}");
+    }
+
+    #[test]
+    fn runtime_output_lines_are_bounded() {
+        assert_eq!(truncate("short", 10), "short");
+        assert_eq!(truncate(&"x".repeat(5000), 4096).len(), 4096);
+        // Never splits a multi-byte character.
+        let s = "é".repeat(10);
+        assert_eq!(truncate(&s, 3), "ééé");
+    }
+
+    /// A runtime that floods its pipes must not be able to block itself. The
+    /// stub writes far more than a pipe buffer holds and must still exit.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_chatty_runtime_cannot_deadlock_on_its_own_output() {
+        let home = temp_home("drain");
+        let paths = ManagedRuntimePaths::under(&home);
+        paths.create_directories().unwrap();
+        write_ownership_marker(&paths, "0.0.0").unwrap();
+        // 1 MB to stdout and 1 MB to stderr, then exit 0.
+        std::fs::write(
+            paths.executable(),
+            b"#!/bin/sh\nhead -c 1048576 /dev/zero | tr '\\0' 'a' \nhead -c 1048576 /dev/zero | tr '\\0' 'b' >&2\nexit 0\n",
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(paths.executable(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut child = spawn_managed_runtime(&paths, 11_434).await.unwrap();
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+            .await
+            .expect("must not hang on a full pipe")
+            .unwrap();
+        assert!(status.success());
     }
 
     #[test]

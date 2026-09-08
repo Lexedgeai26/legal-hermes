@@ -575,11 +575,20 @@ async fn run(
     let installed = stage_try!("verify-models", client.installed_models_detailed().await);
     let gen_found = stage_try!("verify-models", verify_installed_model(&installed, &generation));
     let emb_found = stage_try!("verify-models", verify_installed_model(&installed, &embedding));
-    stage.progress(0.5, "Warming up with synthetic text");
+    stage.progress(0.4, "Warming up the legal model with synthetic text");
     stage_try!("verify-models", cancellable(client.warm_up(&generation.tag), &mut cancel).await);
+    stage.progress(0.7, "Warming up the document-search model");
+    let cold_embed_ms = stage_try!(
+        "verify-models",
+        cancellable(client.warm_up_embedding(&embedding.tag), &mut cancel).await
+    );
     stage.done(format!(
-        "{} ({}) · {} ({})",
-        gen_found.name, short_digest(&gen_found.digest), emb_found.name, short_digest(&emb_found.digest)
+        "{} ({}) · {} ({}) · first document-search load took {:.1}s",
+        gen_found.name,
+        short_digest(&gen_found.digest),
+        emb_found.name,
+        short_digest(&emb_found.digest),
+        cold_embed_ms as f64 / 1000.0
     ));
 
     // 8. write-config --------------------------------------------------------

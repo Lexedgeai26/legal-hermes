@@ -365,11 +365,23 @@ impl OllamaClient {
             .models)
     }
 
-    /// Warm the model with synthetic text. Client documents and user prompts
-    /// must never be used for warm-up.
+    /// Warm the generation model with synthetic text. Client documents and
+    /// user prompts must never be used for warm-up.
     pub async fn warm_up(&self, tag: &str) -> Result<StreamSample, String> {
         self.generate_stream(tag, "Reply with the single word: ready.")
             .await
+    }
+
+    /// Warm the embedding model with synthetic text and report how long the
+    /// cold load took. The first embedding after a runtime start pays the
+    /// full model-load cost (tens of seconds on a first run); warming here
+    /// means validation measures what a user will actually experience, and
+    /// the cold figure is surfaced separately rather than hidden.
+    pub async fn warm_up_embedding(&self, tag: &str) -> Result<u64, String> {
+        let (_vector, cold_ms) = self
+            .embed(tag, "Synthetic warm-up sentence for the embedding model.")
+            .await?;
+        Ok(cold_ms)
     }
 }
 
