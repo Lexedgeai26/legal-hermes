@@ -16,6 +16,7 @@ LexEdge is built on the MIT-licensed Hermes Agent project by Nous Research:
 - [Matter Workspaces](matter-workspaces.md)
 - [Using LexEdge with n8n](n8n-guide.md)
 - [Unified Online Installer implementation plan](unified-online-installer-implementation-plan.md)
+- [Private AI Installer — Developer and Manual QA Guide](private-ai-installer-qa-guide.md)
 - [Unified Online Installer gap analysis and developer handoff](unified-online-installer-gap-analysis-and-developer-handoff.md)
 - [Developer Handbook](developer/README.md)
 - [Architecture Overview](developer/architecture.md)
