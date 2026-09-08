@@ -2,6 +2,7 @@ import { type CSSProperties } from 'react'
 import { Button } from '../components/button'
 import { beginPrivateAiChoice } from '../store'
 import { ArrowRight } from 'lucide-react'
+import appIcon from '../assets/lexedge-app-icon.png'
 
 /*
  * Welcome screen.
@@ -23,6 +24,15 @@ export default function Welcome() {
     <div className="hermes-fade-in flex h-full flex-col items-center justify-center gap-10 px-12 py-10">
       {/* Hero — same recipe the desktop's chat/intro.tsx uses */}
       <div className="w-full max-w-2xl min-w-0 text-center">
+        <img
+          src={appIcon}
+          alt=""
+          aria-hidden="true"
+          width={96}
+          height={96}
+          className="mx-auto mb-5 h-24 w-24 select-none"
+          draggable={false}
+        />
         <p
           className="fit-text mx-auto mb-4 w-full font-['Collapse'] font-bold uppercase leading-[0.9] tracking-[0.08em] text-midground mix-blend-plus-lighter dark:text-foreground/90"
           style={
