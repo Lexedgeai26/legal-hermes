@@ -4312,6 +4312,99 @@ async def validate_provider_credential(body: EnvVarUpdate, request: Request):
     return {"ok": False, "reachable": True, "message": f"Provider returned HTTP {resp.status_code} for this key."}
 
 
+_private_ai_progress_lock = threading.Lock()
+_private_ai_progress: dict = {"active": False, "stage": "", "detail": "", "percent": None, "done": False, "error": None}
+
+
+def _private_ai_on_progress(stage: str, detail: str, percent: Optional[float]) -> None:
+    with _private_ai_progress_lock:
+        _private_ai_progress.update(stage=stage, detail=detail, percent=percent)
+
+
+def _run_private_ai_job(fn) -> bool:
+    """Run a private-ai provisioning/start job on a background thread.
+
+    Returns False without starting anything if a job is already running —
+    the two endpoints below share this and the same progress state, since
+    only one of "install" / "start" can ever meaningfully run at once.
+    """
+    with _private_ai_progress_lock:
+        if _private_ai_progress["active"]:
+            return False
+        _private_ai_progress.update(active=True, stage="", detail="", percent=None, done=False, error=None)
+
+    def _worker() -> None:
+        try:
+            fn(_private_ai_on_progress)
+        except Exception as exc:  # ProvisionError or anything unexpected
+            with _private_ai_progress_lock:
+                _private_ai_progress.update(error=str(exc))
+        finally:
+            with _private_ai_progress_lock:
+                _private_ai_progress.update(active=False, done=True)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return True
+
+
+@app.post("/api/private-ai/provision")
+async def provision_private_ai(request: Request):
+    """Full local install: download, verify, extract, start Ollama, pull
+    the default legal-compact models. Only valid when detection currently
+    reports ``not_setup`` — re-checked here (not just trusted from the
+    client) so a stale UI can't trigger a redundant/conflicting install.
+    Progress is polled via GET /api/private-ai/provision/status; this
+    returns immediately once the background job has started.
+    """
+    _require_token(request)
+    from hermes_cli.private_ai_detect import detect_local_ollama
+    from hermes_cli.private_ai_provision import provision_ollama_runtime
+
+    current = detect_local_ollama(refresh=True)
+    if current.status != "not_setup":
+        return {
+            "started": False,
+            "message": "Private AI is already installed — use Start instead of Set up.",
+        }
+    started = _run_private_ai_job(provision_ollama_runtime)
+    if not started:
+        return {"started": False, "message": "Private AI setup is already in progress."}
+    return {"started": True}
+
+
+@app.post("/api/private-ai/start")
+async def start_private_ai(request: Request):
+    """Start an already-installed Private AI runtime back up. Never
+    downloads anything — only valid when detection currently reports
+    ``unreachable_configured``; re-checked here for the same reason as
+    the provision route above.
+    """
+    _require_token(request)
+    from hermes_cli.private_ai_detect import detect_local_ollama
+    from hermes_cli.private_ai_provision import start_existing_runtime
+
+    current = detect_local_ollama(refresh=True)
+    if current.status != "unreachable_configured":
+        return {
+            "started": False,
+            "message": "No installed-but-stopped Private AI runtime was found to start.",
+        }
+    started = _run_private_ai_job(start_existing_runtime)
+    if not started:
+        return {"started": False, "message": "Private AI is already starting."}
+    return {"started": True}
+
+
+@app.get("/api/private-ai/provision/status")
+async def private_ai_provision_status():
+    """Poll target for the progress of an in-flight provision/start job —
+    matches this codebase's existing "manual/polled, no websocket/SSE"
+    convention (e.g. GET /api/model/options?refresh=1) rather than adding
+    a new transport for just this one feature."""
+    with _private_ai_progress_lock:
+        return dict(_private_ai_progress)
+
+
 @app.delete("/api/env")
 async def remove_env_var(body: EnvVarDelete, profile: Optional[str] = None):
     try:

@@ -351,6 +351,12 @@ export interface ModelOptionProvider {
   /** Per-model option support, keyed by model id (present when the picker
    *  requested capabilities). Lets the UI gate fast/reasoning controls. */
   capabilities?: Record<string, ModelCapabilities>
+  /** Private AI (local Ollama) only, slug "private-ai-local": detection
+   *  state driving which action the card offers — "not_setup" (offer
+   *  Set up Private AI, a full install), "unreachable_configured"
+   *  (offer Start — never re-installs), "reachable_no_models", or
+   *  "connected". Absent for every other provider. */
+  status?: 'not_setup' | 'unreachable_configured' | 'reachable_no_models' | 'connected'
 }
 
 export interface ModelCapabilities {

@@ -873,6 +873,50 @@ export function getGlobalModelOptions(opts?: { refresh?: boolean }): Promise<Mod
   })
 }
 
+// Private AI (local Ollama) auto-provisioning. Two distinct actions —
+// provision (full download+install, only valid when nothing is installed
+// yet) and start (launch an already-installed runtime back up, never
+// re-downloads) — deliberately kept separate on the backend too, so the
+// wrong one can't accidentally trigger a redundant install. Both start a
+// background job and return immediately; poll getPrivateAIProvisionStatus
+// for progress.
+export interface PrivateAIJobStarted {
+  started: boolean
+  message?: string
+}
+
+export interface PrivateAIProvisionStatus {
+  active: boolean
+  stage: string
+  detail: string
+  percent: number | null
+  done: boolean
+  error: string | null
+}
+
+export function provisionPrivateAI(): Promise<PrivateAIJobStarted> {
+  return window.hermesDesktop.api<PrivateAIJobStarted>({
+    ...profileScoped(),
+    path: '/api/private-ai/provision',
+    method: 'POST'
+  })
+}
+
+export function startPrivateAI(): Promise<PrivateAIJobStarted> {
+  return window.hermesDesktop.api<PrivateAIJobStarted>({
+    ...profileScoped(),
+    path: '/api/private-ai/start',
+    method: 'POST'
+  })
+}
+
+export function getPrivateAIProvisionStatus(): Promise<PrivateAIProvisionStatus> {
+  return window.hermesDesktop.api<PrivateAIProvisionStatus>({
+    ...profileScoped(),
+    path: '/api/private-ai/provision/status'
+  })
+}
+
 export interface RecommendedDefaultModel {
   provider: string
   model: string

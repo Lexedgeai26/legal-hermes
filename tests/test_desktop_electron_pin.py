@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -133,3 +134,18 @@ def test_resolver_uses_node_module_resolution():
         "run-electron-builder.cjs must pass the resolved dist to electron-builder "
         "via -c.electronDist."
     )
+
+
+def test_packaged_executable_discovers_current_windows_product_name(tmp_path, monkeypatch):
+    """Windows detection must not depend on the Electron product display name."""
+    from hermes_cli.main import _desktop_packaged_executable
+
+    unpacked = tmp_path / "release" / "win-unpacked"
+    unpacked.mkdir(parents=True)
+    app = unpacked / "Legal AI Agent by LexEdge.exe"
+    app.write_bytes(b"app" * 1000)
+    (unpacked / "chrome_crashpad_handler.exe").write_bytes(b"helper" * 100)
+
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    assert _desktop_packaged_executable(tmp_path) == app
