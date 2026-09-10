@@ -9,12 +9,20 @@ import {
   getGlobalModelInfo,
   getGlobalModelOptions,
   getHermesConfigRecord,
+  getPrivateAIProvisionStatus,
   getRecommendedDefaultModel,
+  provisionPrivateAI,
   saveHermesConfig,
   setEnvVar,
-  setModelAssignment
+  setModelAssignment,
+  startPrivateAI
 } from '@/hermes'
-import type { AuxiliaryModelsResponse, ModelOptionProvider, StaleAuxAssignment } from '@/hermes'
+import type {
+  AuxiliaryModelsResponse,
+  ModelOptionProvider,
+  PrivateAIProvisionStatus,
+  StaleAuxAssignment
+} from '@/hermes'
 import { useI18n } from '@/i18n'
 import { AlertTriangle, Cpu, Loader2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
@@ -127,6 +135,12 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
   // Inline API-key entry for picking an unconfigured `api_key` provider in
   // place — mirrors the onboarding ApiKeyForm but scoped to the model picker.
   const [apiKeyDraft, setApiKeyDraft] = useState('')
+  // Private AI (local Ollama) auto-provision/start — same shape as the
+  // onboarding wizard's equivalent state, kept local to this component
+  // rather than shared, matching this file's existing pattern of a
+  // self-contained inline setup flow distinct from onboarding's.
+  const [privateAiJob, setPrivateAiJob] = useState<PrivateAIProvisionStatus | null>(null)
+  const [privateAiJobError, setPrivateAiJobError] = useState<string | null>(null)
   const [activating, setActivating] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -303,6 +317,41 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
     }
   }, [selectedProviderRow])
 
+  const runPrivateAiJob = useCallback(
+    async (kind: 'provision' | 'start') => {
+      setPrivateAiJobError('')
+      try {
+        const result = await (kind === 'provision' ? provisionPrivateAI() : startPrivateAI())
+        if (!result.started) {
+          setPrivateAiJobError(result.message || 'Could not start Private AI.')
+          return
+        }
+      } catch (err) {
+        setPrivateAiJobError(err instanceof Error ? err.message : 'Could not start Private AI.')
+        return
+      }
+
+      setPrivateAiJob({ active: true, stage: '', detail: '', percent: null, done: false, error: null })
+      const poll = setInterval(async () => {
+        try {
+          const status = await getPrivateAIProvisionStatus()
+          setPrivateAiJob(status)
+          if (status.done) {
+            clearInterval(poll)
+            if (status.error) {
+              setPrivateAiJobError(status.error)
+            } else {
+              await refresh()
+            }
+          }
+        } catch {
+          // Transient poll failure — keep trying on the next tick.
+        }
+      }, 800)
+    },
+    [refresh]
+  )
+
   const applyMainModel = useCallback(async () => {
     if (!selectedProvider || !selectedModel) {
       return
@@ -430,7 +479,24 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
               ))}
             </SelectContent>
           </Select>
-          {needsSetup ? (
+          {selectedProviderRow?.slug === 'private-ai-local' &&
+          (selectedProviderRow.status === 'not_setup' || selectedProviderRow.status === 'unreachable_configured') ? (
+            privateAiJob?.active ? (
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {privateAiJob.detail || 'Working...'}
+                {privateAiJob.percent != null && ` (${Math.round(privateAiJob.percent)}%)`}
+              </span>
+            ) : (
+              <Button
+                onClick={() => void runPrivateAiJob(selectedProviderRow.status === 'not_setup' ? 'provision' : 'start')}
+                size="sm"
+                variant="textStrong"
+              >
+                {selectedProviderRow.status === 'not_setup' ? 'Set up Private AI' : 'Start Private AI'}
+              </Button>
+            )
+          ) : needsSetup ? (
             setupIsApiKey ? (
               <>
                 <Input
@@ -485,7 +551,13 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
             </>
           )}
         </div>
-        {needsSetup && !setupIsApiKey && (
+        {selectedProviderRow?.slug === 'private-ai-local' && privateAiJobError && (
+          <p className="mt-2 text-xs text-red-600">{privateAiJobError}</p>
+        )}
+        {selectedProviderRow?.slug === 'private-ai-local' && selectedProviderRow.warning && !privateAiJobError && (
+          <p className="mt-2 text-xs text-muted-foreground">{selectedProviderRow.warning}</p>
+        )}
+        {needsSetup && !setupIsApiKey && selectedProviderRow?.slug !== 'private-ai-local' && (
           <p className="mt-2 text-xs text-muted-foreground">
             {selectedProviderRow?.auth_type === 'api_key'
               ? `${selectedProviderRow?.name} needs an API key — set it up to choose a model.`

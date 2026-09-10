@@ -181,6 +181,13 @@ _LONG_HANDLERS = frozenset(
         "session.branch",
         "session.compress",
         "session.resume",
+        # Both resolve the configured provider, which for a custom/local
+        # endpoint (e.g. Private AI's Ollama) can trigger a live network
+        # probe. Running inline stalled the whole event loop — and every
+        # other websocket/IPC call sharing it — for 10+ seconds whenever
+        # Ollama was slow to respond (e.g. mid-load of a multi-GB model).
+        "setup.runtime_check",
+        "setup.status",
         "shell.exec",
         "skills.manage",
         "slash.exec",

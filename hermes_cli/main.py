@@ -5014,6 +5014,17 @@ def _write_desktop_build_stamp(project_root: Path, *, source_mode: bool) -> None
         logger.debug("Failed to write desktop build stamp: %s", exc)
 
 
+_WINDOWS_ELECTRON_HELPER_EXECUTABLES = frozenset(
+    {
+        "chrome_crashpad_handler.exe",
+        "elevate.exe",
+        "squirrel.exe",
+        "update.exe",
+        "uninstall.exe",
+    }
+)
+
+
 def _desktop_packaged_executable(desktop_dir: Path) -> Optional[Path]:
     """Return the current platform's unpacked Electron app executable."""
     release_dir = desktop_dir / "release"
@@ -5023,13 +5034,23 @@ def _desktop_packaged_executable(desktop_dir: Path) -> Optional[Path]:
             + list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
         )
     elif sys.platform == "win32":
-        candidates = [
-            release_dir / "win-unpacked" / "Hermes.exe",
-            release_dir / "win-ia32-unpacked" / "Hermes.exe",
-            release_dir / "win-arm64-unpacked" / "Hermes.exe",
-        ]
+        candidates = []
+        for unpacked_dir in release_dir.glob("*-unpacked"):
+            if not unpacked_dir.is_dir():
+                continue
+            executables = [
+                executable
+                for executable in unpacked_dir.glob("*.exe")
+                if executable.name.casefold() not in _WINDOWS_ELECTRON_HELPER_EXECUTABLES
+            ]
+            if executables:
+                # The packaged app is the largest executable in an unpacked
+                # Electron directory; helper binaries are much smaller.
+                candidates.append(max(executables, key=lambda p: p.stat().st_size))
     else:
         candidates = [
+            release_dir / "linux-unpacked" / "LexEdge AI",
+            release_dir / "linux-arm64-unpacked" / "LexEdge AI",
             release_dir / "linux-unpacked" / "hermes",
             release_dir / "linux-unpacked" / "Hermes",
             release_dir / "linux-arm64-unpacked" / "hermes",

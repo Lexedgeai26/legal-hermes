@@ -52,6 +52,7 @@ class ConfigContext:
     current_base_url: str
     user_providers: dict
     custom_providers: list
+    private_ai_placeholder: Optional[dict] = None
 
     def with_overrides(
         self,
@@ -85,6 +86,50 @@ def load_picker_context() -> ConfigContext:
     from hermes_cli.config import get_compatible_custom_providers, load_config
 
     cfg = load_config()
+
+    # Private AI (local Ollama) auto-detection. Always probed — cheap and
+    # cached (hermes_cli/private_ai_detect.py) — so the picker reflects
+    # reality without the user ever configuring an endpoint by hand. Only
+    # a reachable runtime (a real base_url) can be pushed through the
+    # normal custom-provider config pipeline below; an unreachable/never-
+    # installed runtime has no base_url to give it and is instead carried
+    # as a placeholder row through ConfigContext for build_models_payload
+    # to append directly, so the Private AI card never silently disappears.
+    from hermes_cli.private_ai_detect import (
+        build_config_entry,
+        build_placeholder_row,
+        detect_local_ollama,
+    )
+
+    _model_cfg_for_pin = cfg.get("model", {})
+    _current_provider_for_pin = (
+        _model_cfg_for_pin.get("provider", "") if isinstance(_model_cfg_for_pin, dict) else ""
+    )
+
+    private_ai_result = detect_local_ollama()
+    private_ai_config_entry = build_config_entry(private_ai_result)
+    private_ai_placeholder = None
+    if private_ai_config_entry is not None:
+        cfg = dict(cfg)
+        providers_cfg = dict(cfg.get("providers") or {})
+        # setdefault: an explicit user-authored "private-ai-local" entry
+        # in config.yaml always wins over the auto-detected one.
+        providers_cfg.setdefault("private-ai-local", private_ai_config_entry)
+        cfg["providers"] = providers_cfg
+    else:
+        # is_current must reflect config.yaml's actual model.provider, not
+        # a hardcoded False — otherwise a user who already picked Private
+        # AI, then reopens onboarding/settings after the runtime stops
+        # (e.g. app restart), sees the picker default-select some unrelated
+        # provider instead of landing back on the one they configured. See
+        # web_server.py's _persist_private_ai_provider_entry for the other
+        # half of this (writing providers.private-ai-local so provider
+        # resolution at send-time works at all).
+        private_ai_placeholder = build_placeholder_row(
+            private_ai_result,
+            is_current=(_current_provider_for_pin == "private-ai-local"),
+        )
+
     model_cfg = cfg.get("model", {})
     if isinstance(model_cfg, dict):
         current_model = model_cfg.get("default", model_cfg.get("name", "")) or ""
@@ -102,6 +147,7 @@ def load_picker_context() -> ConfigContext:
         current_base_url=current_base_url,
         user_providers=raw if isinstance(raw, dict) else {},
         custom_providers=get_compatible_custom_providers(cfg),
+        private_ai_placeholder=private_ai_placeholder,
     )
 
 
@@ -162,6 +208,46 @@ def build_models_payload(
         max_models=max_models,
         refresh=refresh,
     )
+
+    # Private AI (local Ollama) placeholder — only set when detection found
+    # no reachable base_url (see load_picker_context). Appended directly
+    # rather than routed through list_authenticated_providers, since that
+    # path requires a real, already-normalized custom-provider config
+    # entry, which doesn't exist yet in this state. This is what keeps the
+    # Private AI card present in the picker even with nothing installed.
+    if ctx.private_ai_placeholder is not None:
+        rows = list(rows) + [dict(ctx.private_ai_placeholder)]
+    else:
+        # Reachable, but zero models pulled yet: this row DID come through
+        # list_authenticated_providers (a real base_url exists), so it
+        # already carries authenticated=True set by that function — which
+        # means _apply_picker_hints below will skip it entirely (it only
+        # fills in `warning` for rows that don't already have
+        # `authenticated` set). Attach the explanatory warning here
+        # instead, the one place that already knows this is the
+        # Private AI row specifically.
+        for row in rows:
+            if row.get("slug") != "private-ai-local":
+                continue
+            # Ollama's /v1/models lists chat and embedding models together
+            # (e.g. the auto-pulled embeddinggemma:300m alongside the
+            # generation model) with no capability field to tell them
+            # apart. Selecting an embedding model as the main chat model
+            # isn't just a bad choice — Ollama's completions endpoint
+            # outright 400s it — so it must never appear in this row's
+            # selectable list, not just lose out on being the default.
+            from hermes_cli.private_ai_detect import is_embedding_model_name
+
+            row["models"] = [
+                m for m in (row.get("models") or []) if not is_embedding_model_name(m)
+            ]
+            row["total_models"] = len(row["models"])
+            if row.get("models"):
+                row["status"] = "connected"
+            else:
+                row["status"] = "reachable_no_models"
+                row["warning"] = "Private AI is running, but no models have been pulled yet."
+            break
 
     # --- Deduplicate: remove models from aggregators that overlap with
     # user-defined providers.  When a local proxy (e.g. litellm-proxy)

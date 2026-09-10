@@ -13,15 +13,19 @@ import {
   getGlobalModelOptions,
   getOnboardingStatus,
   getPracticeRoleSoulTemplate,
+  getPrivateAIProvisionStatus,
   getRecommendedDefaultModel,
   getSkills,
+  provisionPrivateAI,
   setEnvVar,
   setGlobalModel,
   saveLexEdgePracticeProfile,
+  startPrivateAI,
   updateOnboardingStep,
   updateProfileSoul,
   validateProviderCredential
 } from '@/hermes'
+import type { PrivateAIProvisionStatus } from '@/hermes'
 import { CheckCircle2, KeyRound, Loader2, MessageCircle, Users } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { ensureGatewayProfile } from '@/store/profile'
@@ -538,6 +542,8 @@ export function LawyerOnboardingWizard({
   const [providers, setProviders] = useState<ModelOptionProvider[]>([])
   const [providerSlug, setProviderSlug] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [privateAiJob, setPrivateAiJob] = useState<PrivateAIProvisionStatus | null>(null)
+  const [privateAiJobError, setPrivateAiJobError] = useState<string | null>(null)
   const [modelSelection, setModelSelection] = useState<null | { model: string; provider: string }>(null)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [aiDisclaimerAccepted, setAiDisclaimerAccepted] = useState(false)
@@ -614,7 +620,14 @@ export function LawyerOnboardingWizard({
               return current
             }
             const sorted = [...rows].sort((a, b) => providerPriority(a) - providerPriority(b))
+            // The provider config.yaml already has selected (model.provider)
+            // must win the default-select, even if it's currently
+            // unauthenticated/keyless (e.g. Private AI with its runtime
+            // stopped) — otherwise reopening this step after a restart
+            // silently jumps to an unrelated provider instead of the one
+            // the user actually configured.
             const preferred =
+              sorted.find(provider => provider.is_current) ??
               sorted.find(provider => provider.authenticated || Boolean(providerKeyEnv(provider))) ??
               sorted[0]
             return preferred?.slug ?? ''
@@ -682,6 +695,16 @@ export function LawyerOnboardingWizard({
       return withoutIndia
     })
   }, [jurisdictionRows, jurisdictions])
+
+  const privateAiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (privateAiPollRef.current) {
+        clearInterval(privateAiPollRef.current)
+      }
+    }
+  }, [])
 
   if (!enabled || !visible) {
     return null
@@ -790,6 +813,53 @@ export function LawyerOnboardingWizard({
 
     setError(null)
     setStep('model')
+  }
+
+  // Runs the Private AI "Set up" (full install) or "Start" (restart an
+  // already-installed runtime) action. The two are never interchangeable —
+  // the backend re-checks detection state server-side too — but the
+  // frontend flow is identical: kick off the background job, poll for
+  // progress, then refresh the provider list so the card picks up the
+  // newly-connected state exactly like any other freshly-authenticated
+  // provider (no special-casing needed past this point — see
+  // saveAndTestModel below, which already handles a zero-key
+  // authenticated:true provider end to end).
+  async function runPrivateAiJob(kind: 'provision' | 'start') {
+    setPrivateAiJobError(null)
+    setError(null)
+    try {
+      const result = await (kind === 'provision' ? provisionPrivateAI() : startPrivateAI())
+      if (!result.started) {
+        setPrivateAiJobError(result.message || 'Could not start Private AI.')
+        return
+      }
+    } catch (err) {
+      setPrivateAiJobError(err instanceof Error ? err.message : 'Could not start Private AI.')
+      return
+    }
+
+    setPrivateAiJob({ active: true, stage: '', detail: '', percent: null, done: false, error: null })
+    privateAiPollRef.current = setInterval(async () => {
+      try {
+        const status = await getPrivateAIProvisionStatus()
+        setPrivateAiJob(status)
+        if (status.done) {
+          if (privateAiPollRef.current) {
+            clearInterval(privateAiPollRef.current)
+            privateAiPollRef.current = null
+          }
+          if (status.error) {
+            setPrivateAiJobError(status.error)
+          } else {
+            const refreshed = await getGlobalModelOptions({ refresh: true })
+            setProviders(refreshed.providers ?? [])
+          }
+        }
+      } catch {
+        // Transient poll failure — leave the interval running, try again
+        // on the next tick rather than surfacing a spurious error.
+      }
+    }, 800)
   }
 
   async function saveAndTestModel() {
@@ -1117,8 +1187,33 @@ export function LawyerOnboardingWizard({
                 <div className="mt-8 grid max-h-[25rem] gap-3 overflow-auto pr-1 lg:grid-cols-3">
                   {providerRows.map(provider => {
                     const selected = provider.slug === selectedProvider?.slug
+                    const isPrivateAi = provider.slug === 'private-ai-local'
                     const connected = Boolean(provider.authenticated)
                     const connectable = connected || Boolean(providerKeyEnv(provider))
+                    const pillLabel = isPrivateAi
+                      ? provider.status === 'not_setup'
+                        ? 'Set up'
+                        : provider.status === 'unreachable_configured'
+                          ? 'Not running'
+                          : provider.status === 'reachable_no_models'
+                            ? 'No models'
+                            : 'Connected'
+                      : connected
+                        ? 'Connected'
+                        : connectable
+                          ? 'API key'
+                          : 'Advanced'
+                    const pillTone = isPrivateAi
+                      ? provider.status === 'connected'
+                        ? 'bg-emerald-500/10 text-emerald-700'
+                        : provider.status === 'not_setup'
+                          ? 'bg-blue-500/10 text-blue-700'
+                          : 'bg-amber-500/10 text-amber-700'
+                      : connected
+                        ? 'bg-emerald-500/10 text-emerald-700'
+                        : connectable
+                          ? 'bg-blue-500/10 text-blue-700'
+                          : 'bg-slate-100 text-slate-500'
                     return (
                       <button
                         className={cn(
@@ -1130,21 +1225,13 @@ export function LawyerOnboardingWizard({
                         onClick={() => {
                           setProviderSlug(provider.slug)
                           setApiKey('')
+                          setPrivateAiJobError(null)
                         }}
                         type="button"
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold">{provider.name}</span>
-                          <span
-                            className={cn(
-                              'rounded-full px-2 py-0.5 text-[0.6875rem]',
-                              connected && 'bg-emerald-500/10 text-emerald-700',
-                              !connected && connectable && 'bg-blue-500/10 text-blue-700',
-                              !connected && !connectable && 'bg-slate-100 text-slate-500'
-                            )}
-                          >
-                            {connected ? 'Connected' : connectable ? 'API key' : 'Advanced'}
-                          </span>
+                          <span className={cn('rounded-full px-2 py-0.5 text-[0.6875rem]', pillTone)}>{pillLabel}</span>
                         </div>
                         <p className="mt-2 text-sm leading-5 text-slate-600">{providerHint(provider)}</p>
                       </button>
@@ -1152,34 +1239,74 @@ export function LawyerOnboardingWizard({
                   })}
                 </div>
 
-                <div className="mt-8 max-w-xl">
-                  <label className="block text-sm font-medium" htmlFor="lexedge-api-key">
-                    API key
-                  </label>
-                  <Input
-                    autoComplete="off"
-                    className="mt-2"
-                    disabled={busy || Boolean(selectedProvider?.authenticated) || !selectedProviderKeyEnv}
-                    id="lexedge-api-key"
-                    onChange={event => setApiKey(event.target.value)}
-                    placeholder={
-                      selectedProvider?.authenticated
-                        ? 'Already connected'
+                {selectedProvider?.slug === 'private-ai-local' &&
+                (selectedProvider.status === 'not_setup' || selectedProvider.status === 'unreachable_configured') ? (
+                  <div className="mt-8 max-w-xl">
+                    {privateAiJob?.active ? (
+                      <div className="rounded-[6px] border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {privateAiJob.detail || 'Working...'}
+                        </div>
+                        {privateAiJob.percent != null && (
+                          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all"
+                              style={{ width: `${Math.min(100, Math.max(0, privateAiJob.percent))}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <Button
+                          disabled={busy}
+                          onClick={() => runPrivateAiJob(selectedProvider.status === 'not_setup' ? 'provision' : 'start')}
+                          type="button"
+                        >
+                          {selectedProvider.status === 'not_setup' ? 'Set up Private AI' : 'Start Private AI'}
+                        </Button>
+                        <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
+                          {selectedProvider.status === 'not_setup'
+                            ? 'Downloads and runs a local AI model on this computer. No API key, address, or port needed — nothing leaves this machine.'
+                            : 'Restarts the local AI model already installed on this computer. No download needed.'}
+                        </p>
+                        {privateAiJobError && <p className="mt-2 text-sm text-red-600">{privateAiJobError}</p>}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-8 max-w-xl">
+                    <label className="block text-sm font-medium" htmlFor="lexedge-api-key">
+                      API key
+                    </label>
+                    <Input
+                      autoComplete="off"
+                      className="mt-2"
+                      disabled={busy || Boolean(selectedProvider?.authenticated) || !selectedProviderKeyEnv}
+                      id="lexedge-api-key"
+                      onChange={event => setApiKey(event.target.value)}
+                      placeholder={
+                        selectedProvider?.authenticated
+                          ? 'Already connected'
+                          : selectedProviderKeyEnv
+                            ? selectedProviderKeyEnv
+                            : 'Advanced setup required'
+                      }
+                      type="password"
+                      value={apiKey}
+                    />
+                    <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
+                      {selectedProvider?.authenticated
+                        ? selectedProvider.slug === 'private-ai-local' && selectedProvider.warning
+                          ? selectedProvider.warning
+                          : 'This AI service is already connected. Continue to run the model test.'
                         : selectedProviderKeyEnv
-                          ? selectedProviderKeyEnv
-                          : 'Advanced setup required'
-                    }
-                    type="password"
-                    value={apiKey}
-                  />
-                  <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
-                    {selectedProvider?.authenticated
-                      ? 'This AI service is already connected. Continue to run the model test.'
-                      : selectedProviderKeyEnv
-                        ? `This saves ${selectedProviderKeyEnv} locally on this computer.`
-                        : 'This provider is supported by Hermes but needs its own advanced setup. Pick an API-key provider to finish onboarding here.'}
-                  </p>
-                </div>
+                          ? `This saves ${selectedProviderKeyEnv} locally on this computer.`
+                          : 'This provider is supported by Hermes but needs its own advanced setup. Pick an API-key provider to finish onboarding here.'}
+                    </p>
+                  </div>
+                )}
               </section>
             )}
 
