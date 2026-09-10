@@ -216,6 +216,24 @@ async def handle_ws(ws: Any) -> None:
                     f"reason={getattr(exc, 'reason', None)})"
                 )
                 break
+            except RuntimeError as exc:
+                # Starlette raises a plain RuntimeError ("WebSocket is not
+                # connected...") instead of _WebSocketDisconnect when the
+                # connection already dropped moments earlier (e.g. a failed
+                # write on this same socket, or a client reconnect racing
+                # this pending receive). Functionally identical to the
+                # WebSocketDisconnect case above — already handled the same
+                # way (close this connection, let the client's next accept
+                # start fresh) — just a noisier exception type, so this
+                # logs one line instead of a full traceback for what is an
+                # expected race, not a real failure.
+                if "not connected" in str(exc).lower():
+                    disconnect_reason = "receive_failed_already_disconnected"
+                    _log.warning("ws receive on already-closed socket peer=%s", peer)
+                    break
+                disconnect_reason = "receive_failed"
+                _log.exception("ws receive failed peer=%s", peer)
+                break
             except Exception:
                 disconnect_reason = "receive_failed"
                 _log.exception("ws receive failed peer=%s", peer)

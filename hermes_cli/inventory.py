@@ -101,6 +101,11 @@ def load_picker_context() -> ConfigContext:
         detect_local_ollama,
     )
 
+    _model_cfg_for_pin = cfg.get("model", {})
+    _current_provider_for_pin = (
+        _model_cfg_for_pin.get("provider", "") if isinstance(_model_cfg_for_pin, dict) else ""
+    )
+
     private_ai_result = detect_local_ollama()
     private_ai_config_entry = build_config_entry(private_ai_result)
     private_ai_placeholder = None
@@ -112,7 +117,18 @@ def load_picker_context() -> ConfigContext:
         providers_cfg.setdefault("private-ai-local", private_ai_config_entry)
         cfg["providers"] = providers_cfg
     else:
-        private_ai_placeholder = build_placeholder_row(private_ai_result)
+        # is_current must reflect config.yaml's actual model.provider, not
+        # a hardcoded False — otherwise a user who already picked Private
+        # AI, then reopens onboarding/settings after the runtime stops
+        # (e.g. app restart), sees the picker default-select some unrelated
+        # provider instead of landing back on the one they configured. See
+        # web_server.py's _persist_private_ai_provider_entry for the other
+        # half of this (writing providers.private-ai-local so provider
+        # resolution at send-time works at all).
+        private_ai_placeholder = build_placeholder_row(
+            private_ai_result,
+            is_current=(_current_provider_for_pin == "private-ai-local"),
+        )
 
     model_cfg = cfg.get("model", {})
     if isinstance(model_cfg, dict):
@@ -213,6 +229,19 @@ def build_models_payload(
         for row in rows:
             if row.get("slug") != "private-ai-local":
                 continue
+            # Ollama's /v1/models lists chat and embedding models together
+            # (e.g. the auto-pulled embeddinggemma:300m alongside the
+            # generation model) with no capability field to tell them
+            # apart. Selecting an embedding model as the main chat model
+            # isn't just a bad choice — Ollama's completions endpoint
+            # outright 400s it — so it must never appear in this row's
+            # selectable list, not just lose out on being the default.
+            from hermes_cli.private_ai_detect import is_embedding_model_name
+
+            row["models"] = [
+                m for m in (row.get("models") or []) if not is_embedding_model_name(m)
+            ]
+            row["total_models"] = len(row["models"])
             if row.get("models"):
                 row["status"] = "connected"
             else:

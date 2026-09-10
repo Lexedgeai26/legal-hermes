@@ -3714,7 +3714,24 @@ def get_recommended_default_model(provider: str = ""):
         for row in payload.get("providers", []):
             if str(row.get("slug", "")).lower() == slug:
                 models = row.get("models") or []
-                return {"provider": slug, "model": models[0] if models else "", "free_tier": None}
+                # Belt-and-suspenders: inventory.build_models_payload already
+                # strips embedding models out of private-ai-local's list
+                # specifically, but other custom providers with no
+                # capability metadata (a bare local endpoint's /v1/models)
+                # can still return chat and embedding models in one flat
+                # list with no ordering guarantee — "embeddinggemma" sorting
+                # before "qwen2.5" alphabetically is exactly how a 2K-context
+                # embedding-only model got picked as the main chat model
+                # here originally, which Hermes Agent's 64K context floor
+                # then rejected outright. Fall back to the raw first entry
+                # only if every candidate looks like an embedding model.
+                from hermes_cli.private_ai_detect import is_embedding_model_name
+
+                default_model = next(
+                    (m for m in models if not is_embedding_model_name(m)),
+                    models[0] if models else "",
+                )
+                return {"provider": slug, "model": default_model, "free_tier": None}
         return {"provider": slug, "model": "", "free_tier": None}
     except Exception:
         _log.exception("GET /api/model/recommended-default failed")
@@ -3904,6 +3921,14 @@ def _apply_model_assignment_sync(
                 # Never block the assignment on the bookkeeping write —
                 # model.* is already persisted and routable.
                 _log.debug("custom_providers registration skipped", exc_info=True)
+
+        # See _persist_private_ai_provider_entry — without this, config.yaml
+        # has model.provider = "private-ai-local" but no matching entry
+        # under providers:, so the next actual chat send fails with
+        # "Unknown provider 'private-ai-local'" once it re-reads config
+        # from disk. Never blocks the assignment itself on failure.
+        if provider.strip().lower() == "private-ai-local":
+            _persist_private_ai_provider_entry()
 
         # Surface auxiliary slots still pinned to a *different* provider than
         # the new main one. Switching the main model does NOT touch aux pins
@@ -4312,6 +4337,36 @@ async def validate_provider_credential(body: EnvVarUpdate, request: Request):
     return {"ok": False, "reachable": True, "message": f"Provider returned HTTP {resp.status_code} for this key."}
 
 
+def _persist_private_ai_provider_entry() -> None:
+    """Write a real ``providers.private-ai-local`` entry to config.yaml.
+
+    The Private AI (Local) row is synthesized in-memory only for the
+    picker response (``inventory.load_picker_context`` merges it into
+    ``cfg["providers"]`` on every /api/model/options call, but never
+    writes it to disk). Without a persisted entry, any later provider
+    resolution that re-reads config.yaml from disk (e.g. sending an
+    actual chat message) fails with "Unknown provider 'private-ai-local'"
+    even though the picker showed it as connected. Called both right
+    after a successful provision/start job and when the user selects it
+    as the main model, so either ordering (start-then-pick or
+    pick-then-start-after-restart) ends up correctly registered.
+    Silently does nothing if Ollama isn't actually reachable right now.
+    """
+    try:
+        from hermes_cli.private_ai_detect import build_config_entry, detect_local_ollama
+
+        entry = build_config_entry(detect_local_ollama(refresh=True))
+        if entry is None:
+            return
+        cfg = load_config()
+        providers = dict(cfg.get("providers") or {})
+        providers["private-ai-local"] = entry
+        cfg["providers"] = providers
+        save_config(cfg)
+    except Exception:
+        _log.debug("private-ai-local provider registration skipped", exc_info=True)
+
+
 _private_ai_progress_lock = threading.Lock()
 _private_ai_progress: dict = {"active": False, "stage": "", "detail": "", "percent": None, "done": False, "error": None}
 
@@ -4336,6 +4391,7 @@ def _run_private_ai_job(fn) -> bool:
     def _worker() -> None:
         try:
             fn(_private_ai_on_progress)
+            _persist_private_ai_provider_entry()
         except Exception as exc:  # ProvisionError or anything unexpected
             with _private_ai_progress_lock:
                 _private_ai_progress.update(error=str(exc))
@@ -4360,7 +4416,10 @@ async def provision_private_ai(request: Request):
     from hermes_cli.private_ai_detect import detect_local_ollama
     from hermes_cli.private_ai_provision import provision_ollama_runtime
 
-    current = detect_local_ollama(refresh=True)
+    # detect_local_ollama does a blocking httpx probe — off the event loop,
+    # or a slow-to-respond Ollama (e.g. mid-load of a large model) stalls
+    # every other concurrent request this async server is handling too.
+    current = await asyncio.to_thread(detect_local_ollama, refresh=True)
     if current.status != "not_setup":
         return {
             "started": False,
@@ -4383,7 +4442,7 @@ async def start_private_ai(request: Request):
     from hermes_cli.private_ai_detect import detect_local_ollama
     from hermes_cli.private_ai_provision import start_existing_runtime
 
-    current = detect_local_ollama(refresh=True)
+    current = await asyncio.to_thread(detect_local_ollama, refresh=True)
     if current.status != "unreachable_configured":
         return {
             "started": False,

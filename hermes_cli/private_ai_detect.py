@@ -61,6 +61,23 @@ class DetectionResult:
     managed: bool = False
 
 
+def is_embedding_model_name(model_id: str) -> bool:
+    """Heuristic: does this Ollama model tag look embedding-only?
+
+    Ollama's OpenAI-compatible ``/v1/models`` returns chat and embedding
+    models in one flat list with no capability field to tell them apart
+    (unlike LM Studio's native API, which does — see
+    ``probe_lmstudio_models`` in ``hermes_cli/models.py``). Embedding
+    models conventionally carry "embed" in their tag (``embeddinggemma``,
+    ``nomic-embed-text``, ``mxbai-embed-large``, ...), so that's the only
+    signal available here. Selecting one as the main chat model doesn't
+    just underperform — Ollama's completions endpoint outright rejects it
+    (HTTP 400), so this predicate is used to exclude such models from the
+    chat-selectable list entirely, not merely deprioritize them.
+    """
+    return "embed" in (model_id or "").lower()
+
+
 def get_private_ai_runtime_json() -> Optional[dict]:
     """Read and validate ``$HERMES_HOME/private-ai/config/runtime.json``.
 
@@ -198,7 +215,7 @@ def build_config_entry(result: DetectionResult) -> Optional[dict]:
     }
 
 
-def build_placeholder_row(result: DetectionResult) -> dict:
+def build_placeholder_row(result: DetectionResult, *, is_current: bool = False) -> dict:
     """Build a full picker row for a state with no real provider yet.
 
     Only meaningful for ``not_setup``/``unreachable_configured`` — always
@@ -211,6 +228,12 @@ def build_placeholder_row(result: DetectionResult) -> dict:
     so ``_apply_picker_hints`` (which skips any row already carrying that
     key) leaves it alone rather than re-deriving skeleton-row hints meant
     for the built-in provider catalog.
+
+    ``is_current``: whether config.yaml's ``model.provider`` is actually
+    ``private-ai-local`` right now. Callers must pass this explicitly (this
+    function has no config access of its own) — it's what lets a picker
+    UI correctly default-select this row when the user already configured
+    Private AI but the runtime happens to be stopped at the moment.
     """
     return {
         "slug": PROVIDER_SLUG,
@@ -218,7 +241,7 @@ def build_placeholder_row(result: DetectionResult) -> dict:
         "status": result.status,
         "base_url": None,
         "authenticated": False,
-        "is_current": False,
+        "is_current": is_current,
         "is_user_defined": True,
         "models": [],
         "total_models": 0,

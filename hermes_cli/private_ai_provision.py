@@ -76,14 +76,32 @@ _COMPONENTS: dict = {
     },
 }
 
-# Default legal-compact profile — reuses the installer's dev catalogue
-# (apps/bootstrap-installer/src-tauri/test-fixtures/catalogue/dev-catalogue.json,
-# profile "legal-compact-dev") so a runtime this module provisions is
-# indistinguishable from one the installer provisioned.
+# Default legal-compact profile — otherwise reuses the installer's dev
+# catalogue (apps/bootstrap-installer/src-tauri/test-fixtures/catalogue/
+# dev-catalogue.json, profile "legal-compact-dev") so a runtime this module
+# provisions is indistinguishable from one the installer provisioned.
+#
+# The generation model is deliberately NOT that profile's qwen2.5:0.5b,
+# though: every profile in the dev catalogue (including the 27B "large"
+# tier) reports an operational context of 8192-32768 tokens, all below
+# Hermes Agent's own hard floor of 64000 (see hermes_cli/main.py's
+# "context window ... is below the minimum 64,000 required by Hermes
+# Agent" check) — so a Private-AI-provisioned session could never
+# actually send a chat message, only exist.
+#
+# phi3.5 (3.8B, ~2.2GB) was tried first for its small footprint and does
+# report 131072 context, but Ollama lists no "tools" capability for it
+# (`ollama show phi3.5` → Capabilities: completion only) — every actual
+# chat turn sends tool definitions, so every request 400'd with
+# "phi3.5:latest does not support tools" despite passing the context
+# check. llama3.1:8b (~4.9GB) is the smallest verified model (checked
+# live via `ollama show`) reporting BOTH 131072 context AND a "tools"
+# capability entry — the two are independent gates and a default here
+# must clear both, not just the context one.
 DEFAULT_PROFILE_ID = "legal-compact-dev"
-DEFAULT_GENERATION_MODEL = "qwen2.5:0.5b"
+DEFAULT_GENERATION_MODEL = "llama3.1:8b"
 DEFAULT_EMBEDDING_MODEL = "embeddinggemma:300m"
-DEFAULT_CONTEXT_TOKENS = 8192
+DEFAULT_CONTEXT_TOKENS = 131072
 CATALOG_ID = "legal-desktop-dev"
 CATALOG_VERSION = "0.0.1-dev"
 
@@ -338,6 +356,17 @@ def start_managed_runtime(executable_path: Path, models_dir: Path) -> RuntimeInf
     env["OLLAMA_NOHISTORY"] = "true"
     env["OLLAMA_NOPRUNE"] = "true"
     env["OLLAMA_ORIGINS"] = "app://*"
+    # Ollama's default keep-alive (5 min) unloads the model from memory
+    # between turns on a slow/idle conversation, forcing a full reload
+    # from disk (multi-GB for the generation model) on the next message —
+    # on CPU-only hardware this reload alone can dwarf actual inference
+    # time. 30m keeps it resident through a normal working session
+    # without pinning it in RAM indefinitely when the app is closed
+    # (still unloads on process exit via the Job Object). Doesn't help a
+    # deliberate model *switch* — Ollama can only keep one large model
+    # loaded at a time on modest hardware, so swapping models always
+    # costs one reload no matter this setting.
+    env["OLLAMA_KEEP_ALIVE"] = "30m"
 
     kwargs: dict = {}
     if sys.platform == "win32":

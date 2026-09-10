@@ -620,7 +620,14 @@ export function LawyerOnboardingWizard({
               return current
             }
             const sorted = [...rows].sort((a, b) => providerPriority(a) - providerPriority(b))
+            // The provider config.yaml already has selected (model.provider)
+            // must win the default-select, even if it's currently
+            // unauthenticated/keyless (e.g. Private AI with its runtime
+            // stopped) — otherwise reopening this step after a restart
+            // silently jumps to an unrelated provider instead of the one
+            // the user actually configured.
             const preferred =
+              sorted.find(provider => provider.is_current) ??
               sorted.find(provider => provider.authenticated || Boolean(providerKeyEnv(provider))) ??
               sorted[0]
             return preferred?.slug ?? ''
@@ -688,6 +695,16 @@ export function LawyerOnboardingWizard({
       return withoutIndia
     })
   }, [jurisdictionRows, jurisdictions])
+
+  const privateAiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (privateAiPollRef.current) {
+        clearInterval(privateAiPollRef.current)
+      }
+    }
+  }, [])
 
   if (!enabled || !visible) {
     return null
@@ -797,16 +814,6 @@ export function LawyerOnboardingWizard({
     setError(null)
     setStep('model')
   }
-
-  const privateAiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (privateAiPollRef.current) {
-        clearInterval(privateAiPollRef.current)
-      }
-    }
-  }, [])
 
   // Runs the Private AI "Set up" (full install) or "Start" (restart an
   // already-installed runtime) action. The two are never interchangeable —

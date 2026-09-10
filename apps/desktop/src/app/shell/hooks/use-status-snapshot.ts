@@ -23,9 +23,22 @@ export function useStatusSnapshot(gatewayState: string | undefined, requestGatew
           getStatus(),
           getLogs({ file: 'gui', lines: LOG_TAIL }).catch(() => ({ lines: [] })),
           gatewayState === 'open'
-            ? evaluateRuntimeReadiness(requestGateway).catch(error => ({
+            ? // unknownReady: true — a genuine "no credentials configured" case
+              // always surfaces as a clean, definitive failure on at least one
+              // of setup.status/setup.runtime_check (see interpretRuntimeReadiness).
+              // Both timing out together instead (the 'fallback' source below,
+              // and the .catch() here for a harder failure) means the RPC pool
+              // couldn't get scheduled in time — observed in practice on
+              // CPU-constrained hardware where an in-flight local-model
+              // generation saturates the machine's only 1-2 cores. That's a
+              // transient load signal, not evidence credentials vanished, so
+              // default to the last-known-good "ready" rather than
+              // interrupting an otherwise-working session with a false setup
+              // prompt; the next 15s poll gets a definitive answer once load
+              // clears.
+              evaluateRuntimeReadiness(requestGateway, { unknownReady: true }).catch(error => ({
                 checksDisagree: false,
-                ready: false,
+                ready: true,
                 reason: error instanceof Error ? error.message : String(error),
                 source: 'fallback' as const
               }))
