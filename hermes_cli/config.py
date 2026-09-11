@@ -2162,7 +2162,7 @@ DEFAULT_CONFIG = {
     },
 
     # Approval mode for dangerous commands:
-    #   manual — always prompt the user
+    #   manual — always prompt the user (default)
     #   smart  — use auxiliary LLM to auto-approve low-risk commands, prompt for high-risk
     #   off    — skip all approval prompts (equivalent to --yolo)
     #
@@ -2170,7 +2170,7 @@ DEFAULT_CONFIG = {
     #   deny    — block the command and let the agent find another way (default, safe)
     #   approve — auto-approve all dangerous commands in cron jobs
     "approvals": {
-        "mode": "off",
+        "mode": "manual",
         "timeout": 60,
         "cron_mode": "deny",
         # When true, /reload-mcp asks the user to confirm before rebuilding

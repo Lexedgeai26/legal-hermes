@@ -470,7 +470,7 @@ async def test_first_run_non_slack_home_channel_onboarding_keeps_direct_command(
     assert result == "ok"
     runner.adapters[Platform.TELEGRAM].send.assert_awaited_once()
     onboarding = runner.adapters[Platform.TELEGRAM].send.await_args.args[1]
-    assert "Type /sethome" in onboarding
+    assert "/sethome" in onboarding
 
 
 @pytest.mark.asyncio

@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "Impossible d'enregistrer le canal principal : {error}"
-    success:               "✅ Canal principal défini sur **{name}** (ID : {chat_id}).\nLes tâches cron et les messages multi-plateformes seront livrés ici."
+    success:               "✅ Cette discussion est désormais votre canal principal LexEdge AI.\n\nJe vous enverrai ici des rappels, des alertes d'échéance, des mises à jour de brouillons et des résumés juridiques programmés.\nVous pouvez modifier cela à tout moment depuis Paramètres > Messagerie."
 
   status:
     header:                "📊 **État de Hermes Gateway**"

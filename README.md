@@ -98,6 +98,10 @@ uv sync --extra all
 uv run hermes
 ```
 
+On Windows, native PowerShell is supported: run `scripts/install.ps1` (via
+`iex (irm https://hermes-agent.nousresearch.com/install.ps1)` or a local
+checkout) to provision Python, Git, and dependencies without WSL.
+
 For the desktop development build:
 
 ```bash
