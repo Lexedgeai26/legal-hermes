@@ -653,7 +653,12 @@ class AIAgent:
         self.session_estimated_cost_usd = 0.0
         self.session_cost_status = "unknown"
         self.session_cost_source = "none"
-        
+
+        # Credits latch: remaining-micros seen at session start, used to compute
+        # cumulative spend (see _capture_credits/get_credits_spent_micros). Reset
+        # per session like the token counters above.
+        self._credits_session_start_micros: int | None = None
+
         # Turn counter (added after reset_session_state was first written — #2635)
         self._user_turn_count = 0
 
@@ -2849,7 +2854,7 @@ class AIAgent:
             _fixture = None
         if _fixture is not None:
             self._credits_state = _fixture
-            if self._credits_session_start_micros is None:
+            if getattr(self, "_credits_session_start_micros", None) is None:
                 self._credits_session_start_micros = _fixture.remaining_micros
             _latch = getattr(self, "_credits_latch", None)
             if isinstance(_latch, dict):
@@ -2890,7 +2895,7 @@ class AIAgent:
         # retain-last-known: only overwrite on a fresh valid parse
         self._credits_state = state
         # Latch session-start remaining the first time we ever see a header
-        if self._credits_session_start_micros is None:
+        if getattr(self, "_credits_session_start_micros", None) is None:
             self._credits_session_start_micros = state.remaining_micros
         if _dev:
             # HERMES_DEV_CREDITS: stream each capture to agent.log — watch live with
@@ -2979,9 +2984,10 @@ class AIAgent:
 
     def get_credits_spent_micros(self):
         """Session-cumulative micros spent = first_seen_remaining - current_remaining. None if no data."""
-        if self._credits_session_start_micros is None or self._credits_state is None:
+        start = getattr(self, "_credits_session_start_micros", None)
+        if start is None or self._credits_state is None:
             return None
-        return self._credits_session_start_micros - self._credits_state.remaining_micros
+        return start - self._credits_state.remaining_micros
 
     def _check_openrouter_cache_status(self, http_response: Any) -> None:
         """Read X-OpenRouter-Cache-Status from response headers and log it.
