@@ -1699,6 +1699,28 @@ function Install-Repository {
         if ($repoValid) {
             Write-Info "Existing installation found, updating..."
             Push-Location $InstallDir
+
+            # A repo can be structurally valid (rev-parse/status/HEAD all
+            # pass) yet still point `origin` at the wrong URL -- e.g. a
+            # leftover checkout from a different install source sharing the
+            # same $InstallDir path. Left unchecked, the fetch/checkout
+            # below silently operates against that foreign remote and fails
+            # confusingly (`pathspec '$Branch' did not match any file(s)`)
+            # if it doesn't happen to share the same branch name, rather
+            # than against the repo this script actually means to manage.
+            # Repair the remote in place before touching anything else so
+            # existing local history/stash state is preserved.
+            $global:LASTEXITCODE = 0
+            $currentOriginUrl = (& git -c windows.appendAtomically=false remote get-url origin 2>$null)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentOriginUrl) -or
+                    ($currentOriginUrl.Trim() -ne $RepoUrlHttps -and $currentOriginUrl.Trim() -ne $RepoUrlSsh)) {
+                Write-Warn "Existing checkout's origin ($currentOriginUrl) doesn't match the expected repository -- repairing it."
+                git -c windows.appendAtomically=false remote remove origin 2>$null
+                git -c windows.appendAtomically=false remote add origin $RepoUrlHttps 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "git remote add origin failed (exit $LASTEXITCODE) while repairing $InstallDir"
+                }
+            }
             # Wrap the entire fetch+checkout block in EAP=Continue so git's
             # routine stderr output (e.g. 'From <url>' info lines emitted by
             # `git fetch`) doesn't terminate the script under the global
