@@ -259,7 +259,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "Theip ar shábháil chainéil bhaile: {error}"
-    success:               "✅ Cainéal baile socraithe go **{name}** (ID: {chat_id}).\nSeachadfar tascanna cron agus teachtaireachtaí trasardáin anseo."
+    success:               "✅ Is é an comhrá seo anois do phríomhchainéal LexEdge AI.\n\nSeolfaidh mé meabhrúcháin, foláirimh spriocdháta, nuashonruithe dréachta agus achoimrí dlíthiúla sceidealta anseo.\nIs féidir leat é seo a athrú am ar bith ó Socruithe > Teachtaireachtaí."
 
   status:
     header:                "📊 **Stádas Hermes Gateway**"

@@ -654,7 +654,7 @@ class TestThreadContext(unittest.TestCase):
             self.assertFalse(send_call["Subject"].startswith("Re: Re:"))
 
     def test_no_thread_context_uses_default_subject(self):
-        """Without thread context, subject should be 'Re: Hermes Agent'."""
+        """Without thread context, subject should be 'Re: LexEdge Personal AI Assistant'."""
         adapter = self._make_adapter()
 
         with patch("smtplib.SMTP") as mock_smtp:
@@ -664,7 +664,7 @@ class TestThreadContext(unittest.TestCase):
             adapter._send_email("newuser@test.com", "Hello!", None)
 
             send_call = mock_server.send_message.call_args[0][0]
-            self.assertEqual(send_call["Subject"], "Re: Hermes Agent")
+            self.assertEqual(send_call["Subject"], "Re: LexEdge Personal AI Assistant")
             self.assertIn("Date", send_call)
 
 
@@ -901,7 +901,9 @@ class TestFetchNewMessages(unittest.TestCase):
 
         mock_imap.uid.side_effect = uid_handler
 
-        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap), \
+                patch("gateway.platforms.email.evaluate_email_headers") as mock_decision:
+            mock_decision.return_value.should_fetch = True
             results = adapter._fetch_new_messages()
 
         # Only UID 3 should be fetched (1 and 2 already seen)
@@ -950,7 +952,9 @@ class TestFetchNewMessages(unittest.TestCase):
 
         mock_imap.uid.side_effect = uid_handler
 
-        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap), \
+                patch("gateway.platforms.email.evaluate_email_headers") as mock_decision:
+            mock_decision.return_value.should_fetch = True
             results = adapter._fetch_new_messages()
 
         self.assertEqual(len(results), 1)
@@ -1001,7 +1005,9 @@ class TestPollLoop(unittest.TestCase):
 
         mock_imap.uid.side_effect = uid_handler
 
-        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap), \
+                patch("gateway.platforms.email.evaluate_email_headers") as mock_decision:
+            mock_decision.return_value.should_fetch = True
             asyncio.run(adapter._check_inbox())
 
         self.assertEqual(len(dispatched), 1)

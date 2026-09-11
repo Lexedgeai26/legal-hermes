@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "无法保存主频道：{error}"
-    success:               "✅ 主频道已设置为 **{name}**（ID：{chat_id}）。\n定时任务和跨平台消息将发送到此处。"
+    success:               "✅ 此聊天现在是您的 LexEdge AI 主频道。\n\n我会将提醒、截止日期警报、草稿更新和定期法律摘要发送到这里。\n您可以随时在“设置 > 消息”中更改此设置。"
 
   status:
     header:                "📊 **Hermes 网关状态**"

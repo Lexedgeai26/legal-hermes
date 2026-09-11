@@ -203,7 +203,7 @@ async def test_sethome_updates_running_config_for_same_process_restart(tmp_path,
     result = await runner._handle_set_home_command(event)
 
     home = runner.config.get_home_channel(Platform.TELEGRAM)
-    assert "Home channel set" in result
+    assert "home channel" in result.lower()
     assert saved["TELEGRAM_HOME_CHANNEL"] == "home-42"
     assert home is not None
     assert home.chat_id == "home-42"
@@ -235,7 +235,7 @@ async def test_sethome_preserves_thread_target_for_same_process_restart(tmp_path
     result = await runner._handle_set_home_command(event)
 
     home = runner.config.get_home_channel(Platform.TELEGRAM)
-    assert "Home channel set" in result
+    assert "home channel" in result.lower()
     assert saved["TELEGRAM_HOME_CHANNEL"] == "parent-42"
     assert saved["TELEGRAM_HOME_CHANNEL_THREAD_ID"] == "topic-7"
     assert home is not None
