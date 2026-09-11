@@ -115,8 +115,15 @@ pub async fn resolve(
         }
     };
 
+    // Commit pins are immutable — safe to reuse the cache forever. Branch
+    // pins are HEAD-tracking (see module doc comment), so a cache hit there
+    // would silently pin us to whatever revision happened to be on GitHub
+    // the first time this ref was ever resolved on this machine — including
+    // any bugs already fixed upstream. Only skip the network for real SHAs.
+    let is_immutable_pin = is_valid_commit(&commit_or_ref);
+
     let cached = cached_path(kind, &commit_or_ref);
-    if cached.exists() {
+    if is_immutable_pin && cached.exists() {
         emit_log(&format!(
             "[bootstrap] using cached {} for {}",
             kind.filename(),
