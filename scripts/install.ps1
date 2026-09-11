@@ -1795,7 +1795,31 @@ function Install-Repository {
                     if ($restoreNow) {
                         Write-Info "Restoring local changes..."
                         git -c windows.appendAtomically=false stash apply $autostashRef
-                        if ($LASTEXITCODE -eq 0) {
+                        $applyFailed = ($LASTEXITCODE -ne 0)
+                        if ($applyFailed) {
+                            # A conflict here is almost always npm/uv regenerating
+                            # the lockfile on every install -- not a real local
+                            # edit worth preserving. If the ONLY unmerged paths are
+                            # known-generated lockfiles, take the post-pull (HEAD)
+                            # version and drop the stashed regen noise so routine
+                            # installs don't get stuck requiring manual recovery.
+                            $unmergedNow = git -c windows.appendAtomically=false diff --name-only --diff-filter=U 2>$null
+                            $unmergedList = @($unmergedNow | Where-Object { $_ })
+                            $generatedLockfiles = @("package-lock.json", "uv.lock")
+                            $onlyGenerated = ($unmergedList.Count -gt 0) -and (-not ($unmergedList | Where-Object { $generatedLockfiles -notcontains $_ }))
+                            if ($onlyGenerated) {
+                                foreach ($f in $unmergedList) {
+                                    Write-Info "Conflict in generated lockfile $f -- keeping the updated version."
+                                    git -c windows.appendAtomically=false checkout --ours -- $f 2>$null
+                                    git -c windows.appendAtomically=false add -- $f 2>$null
+                                }
+                                $stillUnmerged = git -c windows.appendAtomically=false diff --name-only --diff-filter=U 2>$null
+                                if ([string]::IsNullOrWhiteSpace(($stillUnmerged -join "`n"))) {
+                                    $applyFailed = $false
+                                }
+                            }
+                        }
+                        if (-not $applyFailed) {
                             git -c windows.appendAtomically=false stash drop $autostashRef 2>$null
                             Write-Warn "Local changes were restored on top of the updated codebase."
                             Write-Warn "Review git diff / git status if Hermes behaves unexpectedly."

@@ -1304,7 +1304,45 @@ clone_repo() {
 
                 if [ "$restore_now" = "yes" ]; then
                     log_info "Restoring local changes..."
-                    if git stash apply "$autostash_ref"; then
+                    apply_failed="no"
+                    if ! git stash apply "$autostash_ref"; then
+                        apply_failed="yes"
+                        # A conflict here is almost always npm/uv regenerating the
+                        # lockfile on every install -- not a real local edit worth
+                        # preserving. If the ONLY unmerged paths are known-generated
+                        # lockfiles, take the post-pull (HEAD) version and drop the
+                        # stashed regen noise so routine installs don't get stuck
+                        # requiring manual recovery.
+                        unmerged_list="$(git diff --name-only --diff-filter=U 2>/dev/null)"
+                        only_generated="no"
+                        if [ -n "$unmerged_list" ]; then
+                            only_generated="yes"
+                            while IFS= read -r f; do
+                                [ -z "$f" ] && continue
+                                case "$f" in
+                                    package-lock.json|uv.lock) ;;
+                                    *) only_generated="no" ;;
+                                esac
+                            done <<EOF
+$unmerged_list
+EOF
+                        fi
+                        if [ "$only_generated" = "yes" ]; then
+                            while IFS= read -r f; do
+                                [ -z "$f" ] && continue
+                                log_info "Conflict in generated lockfile $f -- keeping the updated version."
+                                git checkout --ours -- "$f" 2>/dev/null
+                                git add -- "$f" 2>/dev/null
+                            done <<EOF
+$unmerged_list
+EOF
+                            still_unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null)"
+                            if [ -z "$still_unmerged" ]; then
+                                apply_failed="no"
+                            fi
+                        fi
+                    fi
+                    if [ "$apply_failed" = "no" ]; then
                         git stash drop "$autostash_ref" >/dev/null
                         log_warn "Local changes were restored on top of the updated codebase."
                         log_warn "Review git diff / git status if Hermes behaves unexpectedly."
