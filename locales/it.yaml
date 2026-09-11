@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "Salvataggio del canale home non riuscito: {error}"
-    success:               "✅ Canale home impostato su **{name}** (ID: {chat_id}).\nI cron job e i messaggi cross-platform verranno consegnati qui."
+    success:               "✅ Questa chat ora è il tuo canale principale LexEdge AI.\n\nInvierò qui promemoria, avvisi di scadenza, aggiornamenti sulle bozze e riepiloghi legali programmati.\nPuoi modificarlo in qualsiasi momento da Impostazioni > Messaggi."
 
   status:
     header:                "📊 **Stato del Gateway Hermes**"

@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "Kon nie tuiste-kanaal stoor nie: {error}"
-    success:               "✅ Tuiste-kanaal gestel op **{name}** (ID: {chat_id}).\nKron-take en kruisplatform-boodskappe sal hier afgelewer word."
+    success:               "✅ Hierdie klets is nou jou LexEdge AI-tuiskanaal.\n\nEk sal herinneringe, sperdatum-waarskuwings, konsepopdaterings en geskeduleerde regsopsommings hierheen stuur.\nJy kan dit enige tyd verander by Instellings > Boodskappe."
 
   status:
     header:                "📊 **Hermes Gateway Status**"

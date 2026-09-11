@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "Ana kanal kaydedilemedi: {error}"
-    success:               "✅ Ana kanal **{name}** (ID: {chat_id}) olarak ayarlandı.\nCron işleri ve platformlar arası mesajlar buraya iletilecek."
+    success:               "✅ Bu sohbet artık LexEdge AI ana kanalınız.\n\nHatırlatmaları, son tarih uyarılarını, taslak güncellemelerini ve planlanmış hukuki özetleri buraya göndereceğim.\nBunu istediğiniz zaman Ayarlar > Mesajlaşma bölümünden değiştirebilirsiniz."
 
   status:
     header:                "📊 **Hermes Gateway Durumu**"

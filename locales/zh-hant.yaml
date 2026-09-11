@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "無法儲存主頻道：{error}"
-    success:               "✅ 主頻道已設定為 **{name}**（ID：{chat_id}）。\n排程任務和跨平台訊息將傳送至此處。"
+    success:               "✅ 此聊天現在是您的 LexEdge AI 主頻道。\n\n我會將提醒、截止日期警示、草稿更新和排定的法律摘要傳送到這裡。\n您可以隨時在「設定 > 訊息」中變更此設定。"
 
   status:
     header:                "📊 **Hermes 閘道狀態**"

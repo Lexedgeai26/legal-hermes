@@ -255,7 +255,7 @@ Future messages in this room will use that transcript until `/reset` or another 
 
   set_home:
     save_failed:           "Nem sikerült menteni a kezdőcsatornát: {error}"
-    success:               "✅ Kezdőcsatorna beállítva: **{name}** (ID: {chat_id}).\nA cron-feladatok és a platformok közötti üzenetek ide érkeznek."
+    success:               "✅ Ez a csevegés mostantól a LexEdge AI kezdőcsatornája.\n\nIde küldök emlékeztetőket, határidő-értesítéseket, piszkozat-frissítéseket és ütemezett jogi összefoglalókat.\nEzt bármikor módosíthatja a Beállítások > Üzenetek menüben."
 
   status:
     header:                "📊 **Hermes Gateway állapot**"
