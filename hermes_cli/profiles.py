@@ -658,9 +658,9 @@ def _profile_yaml_path(profile_dir: Path) -> Path:
 def read_profile_meta(profile_dir: Path) -> dict:
     """Read ``<profile_dir>/profile.yaml`` and return a dict.
 
-    Returns ``{"description": "", "description_auto": False}`` when the
-    file is missing or unreadable. Never raises — a corrupt
-    profile.yaml on an unrelated profile must not break
+    Returns ``{"description": "", "description_auto": False, "practice_role": "",
+    "practice_role_label": ""}`` when the file is missing or unreadable. Never
+    raises — a corrupt profile.yaml on an unrelated profile must not break
     ``hermes profile list``.
     """
     path = _profile_yaml_path(profile_dir)
