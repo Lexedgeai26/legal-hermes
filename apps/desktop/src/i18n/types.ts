@@ -1213,6 +1213,11 @@ export interface Translations {
       refreshModels: string
       fast: string
       medium: string
+      privateAiStart: string
+      privateAiStarting: string
+      privateAiStartFailed: string
+      privateAiSetUpHint: string
+      privateAiNoModelsHint: string
     }
     modelOptions: {
       noOptions: string

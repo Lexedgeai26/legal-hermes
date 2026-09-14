@@ -1603,7 +1603,12 @@ export const en: Translations = {
       editModels: 'Edit Models…',
       refreshModels: 'Refresh Models',
       fast: 'Fast',
-      medium: 'Med'
+      medium: 'Med',
+      privateAiStart: 'Start Private AI',
+      privateAiStarting: 'Starting Private AI…',
+      privateAiStartFailed: 'Could not start Private AI.',
+      privateAiSetUpHint: 'Set up Private AI in Settings → Model.',
+      privateAiNoModelsHint: 'No models pulled yet — add one in Settings → Model.'
     },
     modelOptions: {
       noOptions: 'No options for this model',
