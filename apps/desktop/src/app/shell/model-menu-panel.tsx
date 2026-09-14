@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { HermesGateway } from '@/hermes'
-import { getGlobalModelOptions } from '@/hermes'
+import { getGlobalModelOptions, getPrivateAIProvisionStatus, startPrivateAI } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { currentPickerSelection, displayModelName, modelDisplayParts, reasoningEffortLabel } from '@/lib/model-status-label'
 import { cn } from '@/lib/utils'
@@ -63,6 +63,8 @@ export function ModelMenuPanel({ gateway, onSelectModel, requestGateway }: Model
   const closeMenu = useContext(ModelMenuCloseContext)
   const [search, setSearch] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [startingPrivateAi, setStartingPrivateAi] = useState(false)
+  const [privateAiError, setPrivateAiError] = useState('')
   const queryClient = useQueryClient()
   // Reactive session state is read from the stores here (not drilled in), so
   // toggling effort/fast/model re-renders this panel in place without forcing
@@ -144,6 +146,72 @@ export function ModelMenuPanel({ gateway, onSelectModel, requestGateway }: Model
     }
   }
 
+  // Private AI is the one provider whose row is legitimately model-less: a local
+  // runtime that's installed-but-stopped (or never installed) reports that in
+  // `status`/`warning` while carrying `models: []`. groupModels only reads
+  // `models`, so such a row contributes nothing and the panel falls through to a
+  // bare "No models found" — hiding both the reason and the one-click fix.
+  // Surface it as its own actionable row instead.
+  const privateAi = providers?.find(
+    provider => provider.slug === 'private-ai-local' && provider.status && provider.status !== 'connected'
+  )
+
+  const startPrivateAiRuntime = async () => {
+    if (startingPrivateAi) {
+      return
+    }
+
+    setStartingPrivateAi(true)
+    setPrivateAiError('')
+
+    try {
+      const result = await startPrivateAI()
+
+      if (!result.started) {
+        setPrivateAiError(result.message || copy.privateAiStartFailed)
+        return
+      }
+
+      // Poll the shared provision/start job. First launch can take tens of
+      // seconds (the backend waits up to 25s for Ollama to answer), so this is
+      // bounded rather than open-ended — a stuck job releases the row instead
+      // of spinning forever.
+      const deadline = Date.now() + 60_000
+
+      await new Promise<void>(resolve => {
+        const poll = setInterval(async () => {
+          try {
+            const status = await getPrivateAIProvisionStatus()
+
+            if (status.done) {
+              clearInterval(poll)
+
+              if (status.error) {
+                setPrivateAiError(status.error)
+              }
+
+              resolve()
+              return
+            }
+          } catch {
+            // Transient poll failure — keep trying on the next tick.
+          }
+
+          if (Date.now() > deadline) {
+            clearInterval(poll)
+            resolve()
+          }
+        }, 800)
+      })
+
+      await refreshModels()
+    } catch (err) {
+      setPrivateAiError(err instanceof Error ? err.message : copy.privateAiStartFailed)
+    } finally {
+      setStartingPrivateAi(false)
+    }
+  }
+
   // Selecting a model row restores that model's remembered preset onto the
   // session (effort/fast), gated by capability. Unset → Hermes defaults.
   const selectFamily = async (family: ModelFamily, provider: ModelOptionProvider) => {
@@ -174,6 +242,49 @@ export function ModelMenuPanel({ gateway, onSelectModel, requestGateway }: Model
     [providers, search, optionsModel, optionsProvider, effectiveVisibleModels]
   )
 
+  // Only "installed but stopped" is actionable from here — it never downloads
+  // anything. A full install (not_setup) stays in Settings, which has the
+  // progress/error surface a multi-GB fetch needs.
+  const canStartPrivateAi = privateAi?.status === 'unreachable_configured'
+
+  const privateAiHint =
+    privateAi?.status === 'not_setup'
+      ? copy.privateAiSetUpHint
+      : privateAi?.status === 'reachable_no_models'
+        ? copy.privateAiNoModelsHint
+        : ''
+
+  const privateAiRow = privateAi ? (
+    <DropdownMenuGroup className="py-0.5">
+      <DropdownMenuLabel className={dropdownMenuSectionLabel}>{privateAi.name}</DropdownMenuLabel>
+      <DropdownMenuItem
+        className={cn(dropdownMenuRow, 'flex-col items-start gap-0.5')}
+        disabled={!canStartPrivateAi || startingPrivateAi}
+        onSelect={event => {
+          // Keep the menu open: the start is async and its result (models
+          // appearing, or an error) renders right here in this row.
+          event.preventDefault()
+
+          if (canStartPrivateAi) {
+            void startPrivateAiRuntime()
+          }
+        }}
+      >
+        <span className="flex items-center gap-1.5">
+          {canStartPrivateAi ? (
+            <Codicon name={startingPrivateAi ? 'loading' : 'play'} size="0.75rem" spinning={startingPrivateAi} />
+          ) : null}
+          {canStartPrivateAi ? (startingPrivateAi ? copy.privateAiStarting : copy.privateAiStart) : privateAi.name}
+        </span>
+        {privateAiError || privateAi.warning || privateAiHint ? (
+          <span className="text-muted-foreground text-xs">
+            {privateAiError || privateAi.warning || privateAiHint}
+          </span>
+        ) : null}
+      </DropdownMenuItem>
+    </DropdownMenuGroup>
+  ) : null
+
   return (
     <>
       <DropdownMenuSearch
@@ -203,11 +314,17 @@ export function ModelMenuPanel({ gateway, onSelectModel, requestGateway }: Model
           {error}
         </DropdownMenuItem>
       ) : groups.length === 0 ? (
-        <DropdownMenuItem className={dropdownMenuRow} disabled>
-          {copy.noModels}
-        </DropdownMenuItem>
+        // A Private AI row that needs attention replaces the bare "No models
+        // found" dead-end — that empty state is only honest when there's
+        // genuinely nothing to say.
+        (privateAiRow ?? (
+          <DropdownMenuItem className={dropdownMenuRow} disabled>
+            {copy.noModels}
+          </DropdownMenuItem>
+        ))
       ) : (
         <div className="max-h-[max(150px,30dvh)] overflow-y-auto py-0.5">
+          {privateAiRow}
           {groups.map(group => (
             <DropdownMenuGroup className="py-0.5" key={group.provider.slug}>
               <DropdownMenuLabel className={dropdownMenuSectionLabel}>{group.provider.name}</DropdownMenuLabel>

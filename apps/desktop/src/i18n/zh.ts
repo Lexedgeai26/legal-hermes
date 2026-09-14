@@ -1761,7 +1761,12 @@ export const zh: Translations = {
       editModels: '编辑模型…',
       refreshModels: '刷新模型',
       fast: '快速',
-      medium: '中'
+      medium: '中',
+      privateAiStart: '启动私有 AI',
+      privateAiStarting: '正在启动私有 AI…',
+      privateAiStartFailed: '无法启动私有 AI。',
+      privateAiSetUpHint: '请在“设置 → 模型”中设置私有 AI。',
+      privateAiNoModelsHint: '尚未拉取任何模型 — 请在“设置 → 模型”中添加。'
     },
     modelOptions: {
       noOptions: '此模型没有可用选项',
