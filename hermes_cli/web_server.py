@@ -143,6 +143,47 @@ def _start_desktop_cron_ticker(stop_event: "threading.Event", interval: int = 60
     provider.start(stop_event, interval=interval)
 
 
+def _autostart_private_ai_runtime() -> None:
+    """Bring an already-provisioned Private AI runtime back up on startup.
+
+    ``start_managed_runtime`` ties the Ollama child to *this* process (a
+    Windows Job Object with KILL_ON_JOB_CLOSE, plus an atexit stop hook), so
+    the runtime's lifetime is already scoped to the backend — but nothing
+    ever restarted it. It was only started by an explicit "Set up Private
+    AI" (``/api/private-ai/provision``) or "Start" (``/api/private-ai/start``)
+    click, both reachable solely from Settings and the onboarding wizard. So
+    after any reboot — or any backend restart — a fully installed Private AI
+    stayed down until the user went looking for that button, and the model
+    picker just rendered "No models found" with no hint why (its provider row
+    carries the real ``status``/``warning``, but the panel only reads
+    ``models``).
+
+    Deliberately narrow: only the ``unreachable_configured`` state, which
+    means runtime.json already points at an extracted executable the user
+    explicitly installed. ``start_existing_runtime`` never downloads
+    anything, so this can't turn into a surprise multi-GB fetch. Every other
+    state (notably ``not_setup``) is left to the explicit setup flow.
+
+    Best-effort and fully swallowed: a backend that can't start Ollama must
+    still serve everything else. Losing a race against another backend on the
+    same HERMES_HOME is fine too — the loser fails to bind its port, logs, and
+    the next detection finds the winner's runtime reachable anyway.
+    """
+    try:
+        from hermes_cli.private_ai_detect import detect_local_ollama
+        from hermes_cli.private_ai_provision import start_existing_runtime
+
+        current = detect_local_ollama(refresh=True)
+        if current.status != "unreachable_configured":
+            return
+
+        _log.info("Private AI runtime is installed but stopped — starting it")
+        info = start_existing_runtime()
+        _log.info("Private AI runtime started on %s", info.base_url)
+    except Exception as exc:
+        _log.warning("Private AI runtime autostart skipped: %s", exc)
+
+
 @asynccontextmanager
 async def _lifespan(app: "FastAPI"):
     app.state.event_channels = {}  # dict[str, set]
@@ -167,6 +208,16 @@ async def _lifespan(app: "FastAPI"):
             name="desktop-cron-ticker",
         )
         cron_thread.start()
+
+    # Off the event loop and off the startup path: detection probes and the
+    # runtime's own readiness wait can take tens of seconds, and blocking
+    # lifespan here would delay every route (the desktop shell already gives
+    # up on the backend after 15s).
+    threading.Thread(
+        target=_autostart_private_ai_runtime,
+        daemon=True,
+        name="private-ai-autostart",
+    ).start()
 
     try:
         yield
