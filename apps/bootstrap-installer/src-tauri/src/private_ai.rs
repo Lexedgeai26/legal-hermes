@@ -12,6 +12,19 @@ use serde::{Deserialize, Serialize};
 
 const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 
+/// Hermes Agent refuses to start a session on a model whose context window is
+/// below this (`MINIMUM_CONTEXT_LENGTH` in agent/model_metadata.py, enforced in
+/// agent/agent_init.py: "context window of N tokens, which is below the minimum
+/// 64,000 required by Hermes Agent").
+///
+/// Recommending a profile under the floor produces an install that provisions,
+/// verifies and writes its config perfectly and then cannot send a single chat
+/// message — the failure surfaces much later, in the app, as a ValueError the
+/// installer never sees. So the floor is a hard filter here rather than a
+/// warning: an excluded profile with a stated reason is strictly better than a
+/// successful install of a model the agent will reject.
+pub const MINIMUM_CONTEXT_TOKENS: u64 = 64_000;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationRequest {
@@ -361,6 +374,14 @@ pub fn recommend_models(request: RecommendationRequest) -> Result<Recommendation
                 ));
             }
         }
+        // Unlike the checks above this one is a property of the profile alone,
+        // not of this machine — no amount of RAM rescues a 8K-context model.
+        if profile.operational_context_tokens < MINIMUM_CONTEXT_TOKENS {
+            hard_failures.push(format!(
+                "Operational context of {} tokens is below the {} Hermes Agent requires to start a session",
+                profile.operational_context_tokens, MINIMUM_CONTEXT_TOKENS
+            ));
+        }
 
         let fit = find_fit(profile, &fit_index);
         let model_download_gb = fit
@@ -695,7 +716,9 @@ mod tests {
             requires_gpu: false,
             required_backend: None,
             download_size_gb: 5.0,
-            operational_context_tokens: 8192,
+            // Above MINIMUM_CONTEXT_TOKENS so the context floor stays out of
+            // the way of tests exercising the other filters.
+            operational_context_tokens: 131_072,
             target_tps: 10.0,
             expected_digest: None,
             expected_size_bytes: None,
@@ -811,6 +834,49 @@ mod tests {
         assert_eq!(response.compatible.len(), 1);
         assert_eq!(response.compatible[0].profile_id, "legal-light");
         assert!(response.excluded[0].reasons[0].contains("entitlement"));
+    }
+
+    #[test]
+    fn context_below_the_agent_floor_is_a_hard_filter() {
+        // Regression: the dev catalogue shipped an 8192-token profile, so the
+        // installer provisioned, verified and configured a model that
+        // agent_init.py then refused to start a session on. A model under the
+        // floor must never reach a successful install, however well it fits
+        // the machine's RAM, disk and GPU.
+        let mut request = request();
+        for profile in &mut request.catalogue.profiles {
+            profile.operational_context_tokens = MINIMUM_CONTEXT_TOKENS - 1;
+        }
+
+        let response = recommend_models(request).unwrap();
+
+        assert!(
+            response.compatible.is_empty(),
+            "no sub-floor profile may be recommended, got {:?}",
+            response.compatible
+        );
+        assert!(
+            response
+                .excluded
+                .iter()
+                .all(|e| e.reasons.iter().any(|r| r.contains("below the 64000"))),
+            "every exclusion must say why: {:?}",
+            response.excluded
+        );
+    }
+
+    #[test]
+    fn context_at_the_floor_is_allowed() {
+        // The comparison is `<`, not `<=` — exactly 64000 is what the agent
+        // requires, so it must not be filtered out.
+        let mut request = request();
+        for profile in &mut request.catalogue.profiles {
+            profile.operational_context_tokens = MINIMUM_CONTEXT_TOKENS;
+        }
+
+        let response = recommend_models(request).unwrap();
+
+        assert!(!response.compatible.is_empty());
     }
 
     #[test]

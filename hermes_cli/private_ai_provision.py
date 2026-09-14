@@ -81,13 +81,14 @@ _COMPONENTS: dict = {
 # dev-catalogue.json, profile "legal-compact-dev") so a runtime this module
 # provisions is indistinguishable from one the installer provisioned.
 #
-# The generation model is deliberately NOT that profile's qwen2.5:0.5b,
-# though: every profile in the dev catalogue (including the 27B "large"
-# tier) reports an operational context of 8192-32768 tokens, all below
-# Hermes Agent's own hard floor of 64000 (see hermes_cli/main.py's
-# "context window ... is below the minimum 64,000 required by Hermes
-# Agent" check) — so a Private-AI-provisioned session could never
-# actually send a chat message, only exist.
+# That profile used to carry qwen2.5:0.5b at 8192 tokens — below Hermes
+# Agent's hard floor of 64000 (MINIMUM_CONTEXT_LENGTH in
+# agent/model_metadata.py, enforced in agent/agent_init.py: "context
+# window ... is below the minimum 64,000 required by Hermes Agent") — so
+# a session provisioned from the catalogue could never actually send a
+# chat message, only exist. This module always used llama3.1:8b instead;
+# the catalogue now matches, and private_ai::MINIMUM_CONTEXT_TOKENS is a
+# hard filter in the installer so the two cannot drift apart again.
 #
 # phi3.5 (3.8B, ~2.2GB) was tried first for its small footprint and does
 # report 131072 context, but Ollama lists no "tools" capability for it

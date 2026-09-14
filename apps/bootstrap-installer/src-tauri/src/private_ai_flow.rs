@@ -142,10 +142,18 @@ mod tests {
 
         assert_eq!(analysis.catalogue_id, "legal-desktop-dev");
         assert_eq!(analysis.embedding_dimensions, 768);
-        // Something must be said about every profile in the catalogue.
+        // Something must be said about every profile in the catalogue. Derive
+        // the count from the catalogue itself: a literal here silently becomes
+        // a test of the fixture's length rather than of the guarantee, and has
+        // to be edited every time a profile is added or removed.
+        let expected = crate::catalogue::development_catalogue(&crate::runtime::rfc3339_utc_now())
+            .unwrap()
+            .catalogue
+            .profiles
+            .len();
         let described =
             analysis.recommendation.compatible.len() + analysis.recommendation.excluded.len();
-        assert_eq!(described, 3, "every catalogue profile needs a verdict");
+        assert_eq!(described, expected, "every catalogue profile needs a verdict");
 
         // Every exclusion carries a human-readable reason (brief item 4).
         for excluded in &analysis.recommendation.excluded {

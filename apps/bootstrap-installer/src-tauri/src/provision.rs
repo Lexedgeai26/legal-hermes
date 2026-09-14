@@ -706,7 +706,7 @@ mod tests {
             requires_gpu: false,
             required_backend: None,
             download_size_gb: 1.0,
-            operational_context_tokens: 8192,
+            operational_context_tokens: 131_072,
             target_tps: 20.0,
             expected_digest: None,
             expected_size_bytes: None,
@@ -852,7 +852,7 @@ mod tests {
             })
             .expect("a Complete event");
         assert!(report.passed, "validation must pass: {:?}", report.failed_checks().collect::<Vec<_>>());
-        assert_eq!(config.models.generation, "qwen2.5:0.5b");
+        assert_eq!(config.models.generation, "llama3.1:8b");
         assert_eq!(config.models.embedding, "embeddinggemma:300m");
         assert_eq!(config.ollama.runtime_version, "0.33.3");
         assert!(config.ollama.base_url.starts_with("http://127.0.0.1:"));
@@ -876,11 +876,11 @@ mod tests {
         if crate::component_manifest::current_platform() != Some(crate::component_manifest::Platform::Linux) {
             let plan = resolve_plan("legal-compact-dev").unwrap();
             assert_eq!(plan.component.id, "ollama");
-            assert_eq!(plan.profile.ollama_model, "qwen2.5:0.5b");
+            assert_eq!(plan.profile.ollama_model, "llama3.1:8b");
             assert_eq!(plan.loaded.embedding_model, "embeddinggemma:300m");
             assert_eq!(plan.smaller_profile_id, None, "compact is the smallest");
-            let std_plan = resolve_plan("legal-standard-dev").unwrap();
-            assert_eq!(std_plan.smaller_profile_id.as_deref(), Some("legal-compact-dev"));
+            let large_plan = resolve_plan("legal-large-dev").unwrap();
+            assert_eq!(large_plan.smaller_profile_id.as_deref(), Some("legal-compact-dev"));
         }
     }
 }
