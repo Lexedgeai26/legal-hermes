@@ -1181,6 +1181,58 @@ automatically scope to the active profile.
    This is intentional — it lets `hermes -p coder profile list` see all profiles regardless
    of which one is active.
 
+## Release Signing & Notarization (macOS)
+
+**This repository is public.** Signing identifiers, key IDs and issuer IDs are
+kept in `docs/local/signing.local.md`, which is git-ignored. Private keys
+(`.p8`) live in `~/.appstoreconnect/private_keys/` at mode `0600` and are
+ignored by `*.p8`. Never relax that rule, including "just for CI" — an
+Admin-scoped key was previously committed to a public-facing repo and had to be
+revoked.
+
+The shipped macOS installers are signed with a **Developer ID Application**
+certificate, notarized by Apple, and **stapled**.
+
+### Use an API key, not an Apple ID password
+
+Notarization authenticates one of two ways, and only one of them works here:
+
+* An **app-specific password** authenticates a *person*, who must be a member of
+  the team being submitted for. A non-member gets `401 Unauthenticated` — a
+  message that reads as a mistyped password and misleads accordingly.
+* An **App Store Connect API key** authenticates the *team* directly, so user
+  membership never enters into it.
+
+A revoked key fails with the same `401`, and can fail *mid-build* — one
+architecture notarizing and the next failing, with nothing changed locally. If
+notarization suddenly 401s, verify the key still exists in App Store Connect
+before debugging anything local.
+
+### Stapling is a separate, required step
+
+`notarytool submit` records the result with Apple; `stapler staple` attaches the
+ticket to the artifact. Without stapling, a notarized build still warns on a
+machine with no network, because Gatekeeper cannot reach Apple to check. Verify
+with `spctl -a -t open --context context:primary-signature -v <dmg>` — note the
+`-v`: without it `spctl` prints nothing on success, which is easy to misread as
+failure.
+
+### Two architectures, not universal
+
+`aarch64-apple-darwin` and `x86_64-apple-darwin` are built and shipped
+separately. They are not universal binaries, and the Private AI runtime pins a
+different Ollama artifact per architecture, so a mismatched build produces a
+provisioning failure that looks like a product bug. Artifact names carry both
+the human term and the `uname -m` term for this reason.
+
+Homebrew's Rust ships only the host target in its rustlib and **cannot
+cross-compile**. rustup's toolchain must precede it on `PATH`:
+
+```bash
+rustup target add x86_64-apple-darwin
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
 ## Known Pitfalls
 
 ### DO NOT hardcode `~/.hermes` paths
