@@ -2,7 +2,7 @@ import { QueryClient } from '@tanstack/react-query'
 import { cleanup, render, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getGlobalModelInfo } from '@/hermes'
+import { getGlobalModelInfo, getModelContextFloor } from '@/hermes'
 import {
   $activeSessionId,
   $currentModel,
@@ -18,6 +18,7 @@ const notifyError = vi.fn()
 
 vi.mock('@/hermes', () => ({
   getGlobalModelInfo: vi.fn(),
+  getModelContextFloor: vi.fn(),
   setGlobalModel: (...args: Parameters<typeof setGlobalModel>) => setGlobalModel(...args)
 }))
 
@@ -67,6 +68,10 @@ describe('useModelControls', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+    // restoreAllMocks() only restores real spies (it has nothing to restore a
+    // bare vi.fn() to), so getModelContextFloor's call history and
+    // mockResolvedValue survive across tests unless cleared explicitly.
+    vi.mocked(getModelContextFloor).mockReset()
     $activeSessionId.set(null)
     setCurrentModel('')
     setCurrentProvider('')
@@ -194,5 +199,121 @@ describe('useModelControls', () => {
     // A profile swap forces a reseed to the new profile's default.
     await result.current.refreshCurrentModel(true)
     expect($currentModel.get()).toBe('openai/gpt-5.5')
+  })
+
+  describe('clearStickyModelBelowContextFloor', () => {
+    it('reseeds from the profile default when the sticky private-ai-local pick is below the floor', async () => {
+      setCurrentModel('qwen2.5:0.5b')
+      setCurrentProvider('private-ai-local')
+      vi.mocked(getModelContextFloor).mockResolvedValue({
+        provider: 'private-ai-local',
+        model: 'qwen2.5:0.5b',
+        context_length: 8192,
+        minimum_required: 64_000,
+        below_floor: true
+      })
+      vi.mocked(getGlobalModelInfo).mockResolvedValue({ model: 'llama3.1:8b', provider: 'private-ai-local' })
+
+      const { result } = renderHook(() =>
+        useModelControls({
+          activeSessionId: null,
+          queryClient: new QueryClient(),
+          requestGateway: vi.fn()
+        })
+      )
+
+      await result.current.clearStickyModelBelowContextFloor()
+
+      expect(getModelContextFloor).toHaveBeenCalledWith('private-ai-local', 'qwen2.5:0.5b')
+      expect($currentModel.get()).toBe('llama3.1:8b')
+    })
+
+    it('leaves the pick alone when it clears the floor', async () => {
+      setCurrentModel('llama3.1:8b')
+      setCurrentProvider('private-ai-local')
+      vi.mocked(getModelContextFloor).mockResolvedValue({
+        provider: 'private-ai-local',
+        model: 'llama3.1:8b',
+        context_length: 131_072,
+        minimum_required: 64_000,
+        below_floor: false
+      })
+
+      const { result } = renderHook(() =>
+        useModelControls({
+          activeSessionId: null,
+          queryClient: new QueryClient(),
+          requestGateway: vi.fn()
+        })
+      )
+
+      await result.current.clearStickyModelBelowContextFloor()
+
+      expect($currentModel.get()).toBe('llama3.1:8b')
+    })
+
+    it('never probes a non-private-ai-local pick', async () => {
+      setCurrentModel('claude-sonnet-4.6')
+      setCurrentProvider('anthropic')
+
+      const { result } = renderHook(() =>
+        useModelControls({
+          activeSessionId: null,
+          queryClient: new QueryClient(),
+          requestGateway: vi.fn()
+        })
+      )
+
+      await result.current.clearStickyModelBelowContextFloor()
+
+      expect(getModelContextFloor).not.toHaveBeenCalled()
+      expect($currentModel.get()).toBe('claude-sonnet-4.6')
+    })
+
+    it('runs at most once per hook lifetime, even if the pick changes afterward', async () => {
+      setCurrentModel('llama3.1:8b')
+      setCurrentProvider('private-ai-local')
+      vi.mocked(getModelContextFloor).mockResolvedValue({
+        provider: 'private-ai-local',
+        model: 'llama3.1:8b',
+        context_length: 131_072,
+        minimum_required: 64_000,
+        below_floor: false
+      })
+
+      const { result } = renderHook(() =>
+        useModelControls({
+          activeSessionId: null,
+          queryClient: new QueryClient(),
+          requestGateway: vi.fn()
+        })
+      )
+
+      await result.current.clearStickyModelBelowContextFloor()
+      expect(getModelContextFloor).toHaveBeenCalledTimes(1)
+
+      setCurrentModel('qwen2.5:0.5b')
+      await result.current.clearStickyModelBelowContextFloor()
+
+      expect(getModelContextFloor).toHaveBeenCalledTimes(1)
+      expect($currentModel.get()).toBe('qwen2.5:0.5b')
+    })
+
+    it('never throws and never reseeds when the probe itself fails', async () => {
+      setCurrentModel('qwen2.5:0.5b')
+      setCurrentProvider('private-ai-local')
+      vi.mocked(getModelContextFloor).mockRejectedValue(new Error('runtime unreachable'))
+
+      const { result } = renderHook(() =>
+        useModelControls({
+          activeSessionId: null,
+          queryClient: new QueryClient(),
+          requestGateway: vi.fn()
+        })
+      )
+
+      await expect(result.current.clearStickyModelBelowContextFloor()).resolves.toBeUndefined()
+      expect($currentModel.get()).toBe('qwen2.5:0.5b')
+    })
   })
 })

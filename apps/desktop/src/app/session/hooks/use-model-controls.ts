@@ -1,7 +1,7 @@
 import { type QueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 
-import { getGlobalModelInfo } from '@/hermes'
+import { getGlobalModelInfo, getModelContextFloor } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { notifyError } from '@/store/notifications'
 import {
@@ -74,6 +74,51 @@ export function useModelControls({ activeSessionId, queryClient, requestGateway 
     }
   }, [])
 
+  // The composer's sticky pick (COMPOSER_MODEL_KEY — see store/session.ts's
+  // comment on why it's never re-seeded once set) is never re-checked against
+  // the profile default, so a Private AI install that provisioned a model
+  // later found to sit below Hermes Agent's context floor (e.g. qwen2.5:0.5b
+  // at 8192 tokens, before the installer itself started enforcing that floor)
+  // stays selected forever across an upgrade — the user only discovers it
+  // when a chat turn raises "context window ... is below the minimum 64,000
+  // required by Hermes Agent". This catches that at launch instead, so the
+  // composer is never handed a model Hermes Agent will refuse before the
+  // user has even sent a message.
+  //
+  // Scoped to `private-ai-local` (skipped entirely otherwise) because that's
+  // the only provider where a sub-floor pick is actually reachable — cloud
+  // models are always well above 64K, so probing them here would just be a
+  // wasted round-trip on every single launch. Runs once per app lifetime
+  // (the ref below), not on every reconnect: a floor violation doesn't
+  // reappear on its own once resolved, so repeating the probe on every
+  // gateway reconnect would add nothing but latency.
+  const hasCheckedContextFloorRef = useRef(false)
+
+  const clearStickyModelBelowContextFloor = useCallback(async () => {
+    if (hasCheckedContextFloorRef.current) {
+      return
+    }
+    hasCheckedContextFloorRef.current = true
+
+    const provider = $currentProvider.get()
+    const model = $currentModel.get()
+    if (provider !== 'private-ai-local' || !model) {
+      return
+    }
+
+    try {
+      const result = await getModelContextFloor(provider, model)
+      if (result.below_floor) {
+        await refreshCurrentModel(true)
+      }
+    } catch {
+      // Best-effort: a probe failure (runtime briefly down, model renamed)
+      // must never block the composer or surface as a user-visible error —
+      // worst case, the existing failure mode (a chat-turn ValueError) still
+      // catches it, same as before this check existed.
+    }
+  }, [refreshCurrentModel])
+
   // Returns whether the switch succeeded so callers can await it before applying
   // follow-up changes. The composer model is plain UI state: with no live
   // session it's just stored (and shipped on the next session.create); with one
@@ -120,5 +165,5 @@ export function useModelControls({ activeSessionId, queryClient, requestGateway 
     [activeSessionId, copy.modelSwitchFailed, queryClient, requestGateway, updateModelOptionsCache]
   )
 
-  return { refreshCurrentModel, selectModel, updateModelOptionsCache }
+  return { refreshCurrentModel, selectModel, updateModelOptionsCache, clearStickyModelBelowContextFloor }
 }

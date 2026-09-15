@@ -561,11 +561,12 @@ export function DesktopController() {
     refreshProjectBranch
   })
 
-  const { refreshCurrentModel, selectModel, updateModelOptionsCache } = useModelControls({
-    activeSessionId,
-    queryClient,
-    requestGateway
-  })
+  const { refreshCurrentModel, selectModel, updateModelOptionsCache, clearStickyModelBelowContextFloor } =
+    useModelControls({
+      activeSessionId,
+      queryClient,
+      requestGateway
+    })
 
   const openProviderSettings = useCallback(() => {
     navigate(`${SETTINGS_ROUTE}?tab=providers`)
@@ -860,8 +861,9 @@ export function DesktopController() {
       void refreshCurrentModel()
       void refreshActiveProfile()
       void refreshSessions().catch(() => undefined)
+      void clearStickyModelBelowContextFloor()
     }
-  }, [gatewayState, refreshCurrentModel, refreshSessions])
+  }, [clearStickyModelBelowContextFloor, gatewayState, refreshCurrentModel, refreshSessions])
 
   // Keep the cron jobs section live without a user action: the scheduler ticks
   // in the background (advancing next-run/state and creating runs), so poll the
