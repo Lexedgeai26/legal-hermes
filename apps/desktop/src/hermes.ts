@@ -33,6 +33,7 @@ import type {
   MessagingPlatformUpdate,
   ModelAssignmentRequest,
   ModelAssignmentResponse,
+  ModelContextFloorResponse,
   ModelInfoResponse,
   ModelOptionsResponse,
   OnboardingStatus,
@@ -290,6 +291,14 @@ export function getGlobalModelInfo(): Promise<ModelInfoResponse> {
   return window.hermesDesktop.api<ModelInfoResponse>({
     ...profileScoped(),
     path: '/api/model/info'
+  })
+}
+
+export function getModelContextFloor(provider: string, model: string): Promise<ModelContextFloorResponse> {
+  const query = new URLSearchParams({ provider, model })
+  return window.hermesDesktop.api<ModelContextFloorResponse>({
+    ...profileScoped(),
+    path: `/api/model/context-floor?${query.toString()}`
   })
 }
 

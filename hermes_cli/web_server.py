@@ -3632,6 +3632,66 @@ def get_model_info(profile: Optional[str] = None):
         return dict(_EMPTY_MODEL_INFO)
 
 
+@app.get("/api/model/context-floor")
+def get_model_context_floor(provider: str, model: str):
+    """Report whether an arbitrary (provider, model) pair clears Hermes
+    Agent's minimum context-window floor (``agent.agent_init``'s "context
+    window ... is below the minimum 64,000 required by Hermes Agent" check).
+
+    Exists for the desktop app's sticky composer model pick
+    (``hermes.desktop.composer.model`` in localStorage — see
+    apps/desktop/src/store/session.ts): that pick is deliberately NOT
+    re-seeded from the profile default on every launch, so a Private AI
+    install that provisioned an old, now-known-sub-floor model (e.g.
+    qwen2.5:0.5b at 8192 tokens, before PR #14 raised the installer's own
+    floor) stays selected forever after an upgrade — the user only finds
+    out when a chat turn raises ValueError. This lets the frontend check
+    proactively at startup and reseed instead of waiting for that failure.
+
+    For ``private-ai-local`` specifically, the base URL is resolved from
+    the local runtime detection rather than trusted from the caller, since
+    the managed runtime's port is dynamic per machine and the frontend has
+    no reliable way to know it independent of the backend.
+    """
+    provider = (provider or "").strip()
+    model = (model or "").strip()
+    if not provider or not model:
+        raise HTTPException(status_code=400, detail="provider and model are required")
+
+    base_url = ""
+    if provider == "private-ai-local":
+        try:
+            from hermes_cli.private_ai_detect import detect_local_ollama
+
+            base_url = detect_local_ollama().base_url or ""
+        except Exception:
+            base_url = ""
+
+    try:
+        from agent.model_metadata import MINIMUM_CONTEXT_LENGTH, get_model_context_length
+
+        context_length = get_model_context_length(
+            model=model,
+            base_url=base_url,
+            provider=provider,
+            config_context_length=None,
+        )
+    except Exception:
+        _log.exception("GET /api/model/context-floor failed for %s/%s", provider, model)
+        # Unknown is not the same as "below floor" — a probe failure (model
+        # renamed, runtime briefly down) must never look like a confident
+        # verdict that forces a reseed the user didn't ask for.
+        return {"provider": provider, "model": model, "context_length": 0, "minimum_required": 0, "below_floor": False}
+
+    return {
+        "provider": provider,
+        "model": model,
+        "context_length": context_length,
+        "minimum_required": MINIMUM_CONTEXT_LENGTH,
+        "below_floor": bool(context_length) and context_length < MINIMUM_CONTEXT_LENGTH,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Model assignment — pick provider+model for main slot or auxiliary slots.
 # Mirrors the model.options JSON-RPC from tui_gateway but uses REST so the
