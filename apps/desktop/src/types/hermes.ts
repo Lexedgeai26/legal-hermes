@@ -311,6 +311,17 @@ export interface ModelInfoResponse {
   provider: string
 }
 
+/** GET /api/model/context-floor — see hermes_cli/web_server.py for why this
+ *  exists: catching a sticky composer pick that predates a context-floor fix
+ *  (like PR #14's) before it reaches a failed chat turn instead of after. */
+export interface ModelContextFloorResponse {
+  provider: string
+  model: string
+  context_length: number
+  minimum_required: number
+  below_floor: boolean
+}
+
 export interface ModelPricing {
   /** Formatted $/Mtok input price, e.g. "$3.00", or "free", or "" if unknown. */
   input: string
