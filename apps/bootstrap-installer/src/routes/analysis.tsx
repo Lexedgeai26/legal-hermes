@@ -6,6 +6,7 @@ import {
   $analysisPending,
   $selectedProfileId,
   analyzePrivateAi,
+  backToPrivacy,
   chooseCloudProvider,
   selectProfile,
   startInstall,
@@ -13,8 +14,10 @@ import {
 } from '../store'
 import {
   AlertTriangle,
+  ArrowLeft,
   Check,
   Cpu,
+  HardDrive,
   Info,
   RefreshCw,
   Server
@@ -148,6 +151,7 @@ export default function Analysis() {
 
   const { hardware, recommendation } = analysis
   const compatible = recommendation.compatible
+  const reusable = (analysis.reusableModels ?? []).filter((m) => m.reusable)
   const selected = compatible.find((m) => m.profileId === selectedId) ?? compatible[0]
   // Generation model + the catalogue's embedding model. Recomputed from the
   // user's actual choice rather than reusing the figure for the recommendation.
@@ -158,6 +162,17 @@ export default function Analysis() {
   return (
     <div className="hermes-fade-in flex h-full min-h-0 flex-col gap-4 px-10 py-8">
       <div className="shrink-0">
+        {/* Back to the choice screen. The scan is cheap to re-run and nothing
+            has been downloaded yet, so this must not be a one-way door. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => backToPrivacy()}
+          className="-ml-2 mb-2 inline-flex items-center gap-1.5 text-muted-foreground"
+        >
+          <ArrowLeft size={15} />
+          Back
+        </Button>
         <h1 className="m-0 text-xl font-semibold tracking-tight text-foreground">
           What this computer can run
         </h1>
@@ -167,6 +182,31 @@ export default function Analysis() {
           {analysis.freeDiskGb.toFixed(0)} GB free
         </p>
       </div>
+
+      {/* Reuse notice. Shown above the existing-runtime note because "you
+          already have this, nothing will download" is the more actionable
+          fact — and because a user who sees a multi-gigabyte download beside a
+          model they know they already have will assume the installer is
+          broken. */}
+      {reusable.length > 0 && (
+        <div className="flex shrink-0 items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          <HardDrive size={14} className="mt-0.5 shrink-0" />
+          <span>
+            {reusable.length === 1
+              ? `${reusable[0].friendlyName ?? reusable[0].tag} is already installed on this computer`
+              : `${reusable.length} approved models are already installed on this computer`}
+            {' '}&mdash; choosing{' '}
+            {reusable.length === 1 ? 'it' : 'one of them'} skips the download.
+          </span>
+        </div>
+      )}
+
+      {hardware.existingRuntime.scanNote && (
+        <div className="flex shrink-0 items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          <Info size={14} className="mt-0.5 shrink-0" />
+          <span>{hardware.existingRuntime.scanNote}</span>
+        </div>
+      )}
 
       {hardware.existingRuntime.found && !hardware.existingRuntime.managedByProduct && (
         <div className="flex shrink-0 items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">

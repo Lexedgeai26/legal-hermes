@@ -16,6 +16,7 @@ mod events;
 mod extract;
 mod hardware;
 mod install_script;
+mod existing_models;
 mod llmfit;
 mod powershell;
 mod ollama_api;

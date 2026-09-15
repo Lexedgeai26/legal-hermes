@@ -141,6 +141,8 @@ export interface PrivateAiAnalysis {
       version: string | null
       port: number | null
       managedByProduct: boolean
+      models: DetectedModel[]
+      scanNote: string | null
     }
   }
   recommendation: {
@@ -156,6 +158,31 @@ export interface PrivateAiAnalysis {
   embeddingDownloadGb: number
   freeDiskGb: number
   usedConservativeFallback: boolean
+  reusableModels: ReuseCandidate[]
+}
+
+/// A model found in an Ollama the user installed themselves.
+export interface DetectedModel {
+  tag: string
+  digest: string
+  sizeBytes: number
+  contextLength: number | null
+  supportsTools: boolean
+  capabilitiesKnown: boolean
+  describeError: string | null
+}
+
+/// Whether one installed model can stand in for a catalogue profile. Carries
+/// the grounds either way — a rejection the user cannot understand reads as a
+/// bug, and "you already have this but we downloaded it anyway" is the exact
+/// complaint this feature exists to prevent.
+export interface ReuseCandidate {
+  tag: string
+  profileId: string | null
+  friendlyName: string | null
+  reusable: boolean
+  sizeBytes: number
+  reasons: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +522,27 @@ export async function openLogDir(): Promise<void> {
 export function beginPrivateAiChoice(): void {
   $privateAiChoice.set('undecided')
   $analysisError.set(null)
+  $route.set('privacy')
+}
+
+/// Step back from the Private AI explanation to Welcome. Pure navigation: at
+/// this point nothing has been detected, downloaded or written, so there is
+/// no state to unwind beyond the undecided choice itself.
+export function backToWelcome(): void {
+  $privateAiChoice.set('undecided')
+  $analysisError.set(null)
+  $route.set('welcome')
+}
+
+/// Step back from the hardware analysis to the Private AI explanation, so a
+/// user who has just seen what this machine can run can still change course.
+/// The scan result is cleared deliberately — returning re-runs detection
+/// rather than showing a stale verdict from a moment ago.
+export function backToPrivacy(): void {
+  $privateAiChoice.set('undecided')
+  $analysis.set(null)
+  $analysisError.set(null)
+  $selectedProfileId.set(null)
   $route.set('privacy')
 }
 

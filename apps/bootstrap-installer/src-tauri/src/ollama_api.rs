@@ -244,6 +244,83 @@ pub fn verify_installed_model(
 }
 
 // ---------------------------------------------------------------------------
+// Model interrogation (/api/show)
+// ---------------------------------------------------------------------------
+
+/// What `/api/show` reports about a single installed model.
+///
+/// Two independent gates decide whether a model can serve as Hermes' generation
+/// model, and both must be read from the runtime rather than assumed from the
+/// tag name:
+///
+///   * the operational context window, which must clear Hermes' floor;
+///   * a `tools` capability, because every chat turn sends tool definitions.
+///
+/// They are genuinely independent — a model can advertise 131072 context and
+/// still have no tool support (phi3.5), or expose tools with a 32768 window
+/// (functiongemma). Checking one and inferring the other ships an install that
+/// provisions cleanly and then fails on the first message.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDetail {
+    pub context_length: Option<u64>,
+    pub supports_tools: bool,
+    /// False when the runtime returned no `capabilities` array at all, which
+    /// older Ollama builds do. Absent is NOT the same as "no tools": it means
+    /// we cannot tell, and an unknown must never be promoted to a pass.
+    pub capabilities_known: bool,
+}
+
+/// Parse `/api/show`. Pure so the field-shape edge cases are covered without a
+/// live runtime.
+///
+/// The context length lives under an architecture-prefixed key
+/// (`llama.context_length`, `gemma3.context_length`, `qwen3.context_length`, …)
+/// so it cannot be read from a fixed key without breaking on the next
+/// architecture Ollama adds. `general.architecture` names the right prefix when
+/// present; otherwise any `*.context_length` is accepted, scanned in sorted key
+/// order so a multi-architecture payload resolves the same way every time.
+pub fn parse_show_response(body: &str) -> Result<ModelDetail, String> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|_| "The model description was not readable".to_string())?;
+
+    let info = value.get("model_info").and_then(|v| v.as_object());
+    let context_length = info.and_then(|info| {
+        let architecture = info
+            .get("general.architecture")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if let Some(arch) = architecture {
+            if let Some(found) = info.get(&format!("{arch}.context_length")).and_then(|v| v.as_u64())
+            {
+                return Some(found);
+            }
+        }
+        let mut keys: Vec<&String> = info.keys().collect();
+        keys.sort();
+        keys.into_iter()
+            .filter(|k| k.ends_with(".context_length"))
+            .find_map(|k| info.get(k).and_then(|v| v.as_u64()))
+    });
+
+    let capabilities = value.get("capabilities").and_then(|v| v.as_array());
+    let capabilities_known = capabilities.is_some();
+    let supports_tools = capabilities
+        .map(|caps| {
+            caps.iter()
+                .filter_map(|c| c.as_str())
+                .any(|c| c.eq_ignore_ascii_case("tools"))
+        })
+        .unwrap_or(false);
+
+    Ok(ModelDetail {
+        context_length,
+        supports_tools,
+        capabilities_known,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
@@ -363,6 +440,34 @@ impl OllamaClient {
             .await
             .map_err(|_| "The installed-model list was not readable".to_string())?
             .models)
+    }
+
+    /// Describe one installed model.
+    ///
+    /// Failure here is per-model and expected in normal operation: cloud-hosted
+    /// catalogue entries answer 410 Gone, and a model deleted between `/api/tags`
+    /// and this call answers 404. Callers must treat an `Err` as "this one model
+    /// is not a candidate" and keep scanning — never as a failed scan.
+    pub async fn show_model(&self, tag: &str) -> Result<ModelDetail, String> {
+        let response = self
+            .client
+            .post(self.url("/api/show"))
+            .json(&serde_json::json!({ "model": tag }))
+            .timeout(CONTROL_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| format!("Unable to describe {tag}"))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "The runtime could not describe {tag} (HTTP {})",
+                response.status().as_u16()
+            ));
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|_| format!("The description of {tag} was not readable"))?;
+        parse_show_response(&body)
     }
 
     /// Warm the generation model with synthetic text. Client documents and
@@ -600,6 +705,109 @@ fn classify_execution_mode(total_size: u64, vram_size: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    // --- /api/show parsing -------------------------------------------------
+    // Shapes here are taken from live `/api/show` responses (Ollama 0.33.x)
+    // rather than invented, including the ones that previously had no coverage
+    // at all: architecture-prefixed context keys, and older builds that omit
+    // `capabilities` entirely.
+
+    #[test]
+    fn reads_context_length_from_the_architecture_prefixed_key() {
+        let body = r#"{
+            "capabilities": ["completion", "tools"],
+            "model_info": {
+                "general.architecture": "llama",
+                "llama.context_length": 131072,
+                "llama.embedding_length": 4096
+            }
+        }"#;
+        let detail = super::parse_show_response(body).unwrap();
+        assert_eq!(detail.context_length, Some(131072));
+        assert!(detail.supports_tools);
+        assert!(detail.capabilities_known);
+    }
+
+    #[test]
+    fn reads_context_length_for_an_architecture_we_have_never_seen() {
+        // The point of suffix matching: a future architecture must not need a
+        // code change to be readable.
+        let body = r#"{
+            "capabilities": ["tools"],
+            "model_info": {
+                "general.architecture": "somethingnew",
+                "somethingnew.context_length": 200000
+            }
+        }"#;
+        assert_eq!(
+            super::parse_show_response(body).unwrap().context_length,
+            Some(200000)
+        );
+    }
+
+    #[test]
+    fn falls_back_to_any_context_key_when_architecture_is_absent() {
+        let body = r#"{
+            "capabilities": ["tools"],
+            "model_info": { "qwen3.context_length": 262144 }
+        }"#;
+        assert_eq!(
+            super::parse_show_response(body).unwrap().context_length,
+            Some(262144)
+        );
+    }
+
+    #[test]
+    fn missing_capabilities_array_is_unknown_not_unsupported() {
+        // Older Ollama builds omit `capabilities`. Treating absent as "no
+        // tools" would silently exclude every model on those machines; treating
+        // it as "has tools" would ship an install that fails on first message.
+        // It must be reported as unknown so the caller can decide.
+        let body = r#"{
+            "model_info": {
+                "general.architecture": "llama",
+                "llama.context_length": 131072
+            }
+        }"#;
+        let detail = super::parse_show_response(body).unwrap();
+        assert!(!detail.capabilities_known);
+        assert!(!detail.supports_tools);
+        assert_eq!(detail.context_length, Some(131072));
+    }
+
+    #[test]
+    fn tools_capability_is_detected_case_insensitively() {
+        let body = r#"{"capabilities": ["Completion", "TOOLS"], "model_info": {}}"#;
+        assert!(super::parse_show_response(body).unwrap().supports_tools);
+    }
+
+    #[test]
+    fn completion_only_model_reports_no_tools() {
+        // The phi3.5 case: real 131072 context, no tool support.
+        let body = r#"{
+            "capabilities": ["completion"],
+            "model_info": {
+                "general.architecture": "phi3",
+                "phi3.context_length": 131072
+            }
+        }"#;
+        let detail = super::parse_show_response(body).unwrap();
+        assert!(detail.capabilities_known);
+        assert!(!detail.supports_tools);
+    }
+
+    #[test]
+    fn absent_model_info_yields_no_context_rather_than_an_error() {
+        let body = r#"{"capabilities": ["tools"]}"#;
+        let detail = super::parse_show_response(body).unwrap();
+        assert_eq!(detail.context_length, None);
+        assert!(detail.supports_tools);
+    }
+
+    #[test]
+    fn malformed_json_is_an_error() {
+        assert!(super::parse_show_response("not json").is_err());
+    }
+
     use super::*;
 
     #[test]
