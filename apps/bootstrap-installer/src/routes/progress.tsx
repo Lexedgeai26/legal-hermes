@@ -9,6 +9,7 @@ import {
 } from '../store'
 import { Check, X, ChevronRight, FileText, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
+import InstallHighlights from '../components/install-highlights'
 
 interface ProgressProps {
   bootstrap: BootstrapStateModel
@@ -98,6 +99,17 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
             })}
           </ol>
         </div>
+
+        {/* Capability notes fill the right half while the install runs. They
+            yield to the log panel the moment the user opens it: someone who
+            asked for the logs wants the logs, not reading material. They are
+            also hidden once the run is no longer in progress, where the stage
+            list and its outcome are the only thing worth attention. */}
+        {!showLogs && bootstrap.status === 'running' && (
+          <div className="hidden w-1/2 border-l border-border bg-card/20 md:block">
+            <InstallHighlights />
+          </div>
+        )}
 
         {showLogs && (
           <div className="flex w-1/2 flex-col border-l border-border bg-card/40">

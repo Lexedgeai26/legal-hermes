@@ -7,6 +7,7 @@
 
 use serde::Serialize;
 
+use crate::existing_models::{evaluate_reuse, InstalledCandidate, ReuseCandidate};
 use crate::catalogue::LoadedCatalogue;
 use crate::hardware::{detect_private_ai_hardware, HardwareInventory};
 use crate::private_ai::{
@@ -37,6 +38,13 @@ pub struct PrivateAiAnalysis {
     pub free_disk_gb: f64,
     /// True when llmfit could not be used and conservative rules applied.
     pub used_conservative_fallback: bool,
+    /// Verdicts for models an already-installed Ollama holds. Anything marked
+    /// reusable is a catalogue model already on disk, so choosing it skips the
+    /// download entirely. Non-reusable entries carry the reason, because
+    /// "you have this model but we are downloading it anyway" is exactly the
+    /// behaviour a user would otherwise report as a bug.
+    #[serde(default)]
+    pub reusable_models: Vec<ReuseCandidate>,
 }
 
 /// Free space on the volume that will hold the models. We use the smallest
@@ -118,6 +126,37 @@ pub async fn analyze_private_ai_options() -> Result<PrivateAiAnalysis, String> {
         .map(|model| model.download_size_gb)
         .unwrap_or(0.0);
 
+    // Reuse verdicts are advisory: they never change which profiles are
+    // offered, only whether the chosen one still has to be downloaded. Hardware
+    // fit is still decided by the recommendation engine above, because a
+    // catalogue model already on disk can still be too large for this machine.
+    let reusable_models = evaluate_reuse(
+        &hardware
+            .existing_runtime
+            .models
+            .iter()
+            .map(|model| InstalledCandidate {
+                tag: model.tag.clone(),
+                digest: model.digest.clone(),
+                size_bytes: model.size_bytes,
+                // A model the runtime refused to describe carries no usable
+                // facts, so it is passed through as absent rather than as a
+                // zeroed-out description that would read as "no tools".
+                detail: if model.describe_error.is_some() {
+                    None
+                } else {
+                    Some(crate::ollama_api::ModelDetail {
+                        context_length: model.context_length,
+                        supports_tools: model.supports_tools,
+                        capabilities_known: model.capabilities_known,
+                    })
+                },
+            })
+            .collect::<Vec<_>>(),
+        &loaded.catalogue.profiles,
+        crate::private_ai::MINIMUM_CONTEXT_TOKENS,
+    );
+
     Ok(PrivateAiAnalysis {
         catalogue_id: loaded.catalogue.id.clone(),
         catalogue_version: loaded.catalogue.version.clone(),
@@ -129,6 +168,7 @@ pub async fn analyze_private_ai_options() -> Result<PrivateAiAnalysis, String> {
         used_conservative_fallback: recommendation.used_conservative_fallback,
         hardware,
         recommendation,
+        reusable_models,
     })
 }
 
