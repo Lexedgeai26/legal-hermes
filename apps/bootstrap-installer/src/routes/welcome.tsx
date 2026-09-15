@@ -1,7 +1,7 @@
 import { type CSSProperties } from 'react'
 import { Button } from '../components/button'
 import { beginPrivateAiChoice } from '../store'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, HardDrive, Cloud, Cpu } from 'lucide-react'
 import appIcon from '../assets/lexedge-app-icon.png'
 
 /*
@@ -18,7 +18,27 @@ import appIcon from '../assets/lexedge-app-icon.png'
  * The install button opens the Private AI decision rather than starting the
  * install outright, so the user is asked about local inference before
  * anything is downloaded.
+ *
+ * The two-path preview below the tagline exists because users previously hit
+ * the Private AI screen with no warning that a choice was coming, read it as
+ * an unexpected upsell, and could not tell whether their machine was even a
+ * candidate. Naming both paths here — and saying plainly that we measure the
+ * machine and recommend rather than making them guess — turns the next screen
+ * into a confirmation instead of a surprise.
  */
+const PATHS = [
+  {
+    icon: HardDrive,
+    title: 'Private AI',
+    body: 'A legal model runs on this computer. Documents never leave the machine. Needs enough memory and disk.'
+  },
+  {
+    icon: Cloud,
+    title: 'Cloud provider',
+    body: 'The agent calls a hosted model over the internet. Runs on any machine and installs in minutes.'
+  }
+]
+
 export default function Welcome() {
   return (
     <div className="hermes-fade-in flex h-full flex-col items-center justify-center gap-10 px-12 py-10">
@@ -50,8 +70,38 @@ export default function Welcome() {
         </p>
 
         <p className="m-0 text-center text-base leading-normal tracking-tight text-muted-foreground">
-          The agent that grows with you. We&rsquo;ll set things up in the
-          background &mdash; takes a few minutes.
+          Built for legal practice &mdash; draft notices and replies, check
+          citations, build chronologies and track limitation. We&rsquo;ll set
+          things up in the background.
+        </p>
+
+        {/* Two-path preview. Deliberately says "or" and not "and": these are
+            alternatives, and either one is a complete install. */}
+        <div className="mx-auto mt-8 flex max-w-lg items-stretch gap-3 text-left">
+          {PATHS.map(({ icon: Icon, title, body }) => (
+            <div
+              key={title}
+              className="flex-1 rounded-lg border border-border/60 bg-muted/20 px-4 py-3"
+            >
+              <div className="flex items-center gap-2">
+                <Icon size={15} className="shrink-0 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">
+                  {title}
+                </span>
+              </div>
+              <p className="m-0 mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                {body}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <p className="mx-auto mt-4 flex max-w-lg items-center justify-center gap-2 text-center text-sm leading-relaxed text-muted-foreground">
+          <Cpu size={15} className="shrink-0" />
+          <span>
+            We&rsquo;ll measure this computer first and recommend the one it can
+            actually run. Nothing downloads until you choose.
+          </span>
         </p>
       </div>
 
