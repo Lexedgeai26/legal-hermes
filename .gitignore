@@ -190,3 +190,13 @@ apps/desktop/.hermes/
 *matter*
 *Matter*
 !docs/matter-workspaces.md
+
+# --- Release signing secrets -------------------------------------------------
+# *.p8 is already ignored above. These cover the surrounding material: signing
+# key IDs and issuer IDs are not private keys, but this repository is PUBLIC, so
+# they stay out of it and live in an ignored local note instead.
+docs/local/
+*.local.md
+**/private_keys/
+*.mobileprovision
+*.p12
