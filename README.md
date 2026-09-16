@@ -22,12 +22,47 @@ The desktop setup asks about the user's practice rather than exposing infrastruc
 ### Full personal-agent workspace
 
 - Streaming chat with tool activity and structured results.
-- Multiple model providers, including cloud APIs, compatible endpoints, and local models such as Ollama.
+- Multiple model providers, including cloud APIs, compatible endpoints, and local models.
+- Private AI: a local legal model installed and managed by the setup app itself, with no separate download or terminal step.
 - File browser, side-by-side previews, voice features, artifacts, and export workflows.
 - Profiles for separating teams, clients, roles, or practice areas.
 - Scheduled tasks and reminders through cron.
 - Optional messaging integrations and MCP-connected tools.
 - Local desktop backend bound to the user's machine by default.
+
+### Private AI: a legal model that runs on the computer
+
+Private AI runs a legal language model **on the lawyer's own machine**. Matter
+documents and prompts are not sent to LexEdge or to any model provider, and the
+agent keeps working without an internet connection.
+
+It is set up by the same installer as everything else. There is **no separate
+Ollama install, no terminal, and no configuration file** — the runtime and the
+models are provisioned for the user, verified by checksum before use, and kept
+separate from any Ollama the user may already run.
+
+**The installer measures the computer before it recommends anything.** Setup
+inspects CPU, memory, graphics memory, and free disk space, then shows only the
+models this machine can actually run, with the reasons each one fits. Models
+that will not run are listed separately with the specific reason — not enough
+memory, not enough disk — rather than being silently hidden. The download size
+is stated before anything is downloaded.
+
+Only models from a **signed LexEdge catalogue** that have passed legal benchmark
+review are offered. A model is checked for two independent requirements before
+it is proposed: a context window large enough for real legal documents, and
+support for the tool calls every chat turn depends on.
+
+**Private AI is optional, and declining costs nothing.** Setup offers a clear
+choice between Private AI and a cloud provider, explains what each means
+including its trade-offs, and treats the cloud route as a first-class outcome
+rather than a fallback. On a machine that cannot run a local model, the cloud
+route gives a complete, working install. The choice can be changed later in
+Settings.
+
+If an Ollama installation is already present, setup detects it, reports which of
+its models meet the requirements, and installs its own runtime on a separate
+port without modifying or removing the existing one.
 
 ### Matter Workspaces
 
@@ -76,12 +111,27 @@ See [Using LexEdge with n8n](docs/n8n-guide.md) before importing or activating w
 The simplest path for a lawyer or law-firm user is the desktop installer:
 
 1. Open the [LexEdge download page](https://lexedge.ai/download-hermes/).
-2. Choose macOS or Windows.
-3. Install and launch LexEdge AI.
-4. Keep the setup window open while the local runtime is prepared.
-5. Complete the legal-practice, provider/model, and skills onboarding.
+2. Choose the build for the computer — macOS (Apple Silicon or Intel) or Windows.
+3. Install and launch LexEdge Hermes Agent Setup.
+4. Choose **Private AI** or a **cloud provider** when asked. Choosing Private AI
+   runs a short hardware check and then recommends the models this computer can
+   run; nothing is downloaded until the choice is confirmed.
+5. Keep the setup window open while the runtime is prepared.
+6. Complete the legal-practice, provider/model, and skills onboarding.
+
+One installer covers everything. There is no separate download for the local AI
+runtime, no terminal step, and no configuration file to edit.
 
 The first launch may install Python, Git, Node.js, Python packages, Node modules, and browser helpers. This one-time process can take several minutes, especially on a fresh computer or corporate network. Later launches reuse the installed runtime.
+
+Choosing Private AI adds a model download of several gigabytes; the exact size
+is shown before it starts. Choosing a cloud provider skips that entirely and
+finishes in minutes.
+
+The macOS installers are signed with a Developer ID certificate and notarized by
+Apple, so they open normally without security warnings. On macOS the installed
+app doubles as a launcher: once Hermes is installed, opening it starts the app
+rather than showing setup again.
 
 Detailed instructions:
 
@@ -114,6 +164,10 @@ See [INSTALL.md](INSTALL.md) for platform requirements, packaging, and verificat
 ## Privacy, security, and cost
 
 The software is MIT licensed and has no LexEdge licence fee. Running it can still involve costs for hardware, hosting, model APIs, email/storage services, OCR, legal databases, or professional support. n8n Community Edition has its own licence terms; review them before commercial redistribution or embedding.
+
+With Private AI selected, matter documents and prompts are processed on the
+lawyer's own machine and are not sent to LexEdge or to a model provider. Other
+connectors are unaffected by that choice and still send whatever they are given.
 
 LexEdge and n8n can run on infrastructure controlled by the user or firm. That does not make every configuration automatically private. Data sent to a cloud model, Gmail, Google Drive, OCR provider, research service, or another connector is processed under that provider's terms. Use least-privilege credentials, encrypted storage, authenticated gateways, restricted logs, backups, and approval gates for external actions.
 

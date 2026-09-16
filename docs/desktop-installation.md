@@ -35,6 +35,18 @@ Useful logs:
 ~/.hermes/logs/bootstrap-*.log
 ```
 
+
+The macOS installers are signed with a Developer ID certificate and notarized by
+Apple, so they open normally — no right-click-Open step and no security warning.
+Apple Silicon and Intel builds are published separately and are not
+interchangeable; check which Mac you have (Apple menu → About This Mac) and take
+the matching download.
+
+Once Hermes is installed, opening the setup app again **launches LexEdge AI
+instead of showing setup**. That is intentional, so the installed icon works as
+a normal launcher. To run setup again — to repair an install or change the
+Private AI choice — use the repair instructions below.
+
 ## Windows installation
 
 LexEdge runs natively on Windows 10/11; WSL is not required.
@@ -87,6 +99,67 @@ After runtime setup, the legal onboarding wizard asks for:
 
 Completing legal onboarding also completes provider onboarding; the app should not ask for the same provider again.
 
+## Choosing Private AI or a cloud provider
+
+Early in setup LexEdge asks where the language model should run. Both answers
+produce a complete, working install; neither is a downgrade.
+
+| | Private AI | Cloud provider |
+| --- | --- | --- |
+| Where the model runs | This computer | The provider's servers |
+| Matter documents | Never leave the machine | Sent to the provider with each request |
+| Works offline | Yes | No |
+| Requirements | Enough memory and disk | Internet connection and an API key |
+| Setup time | Several gigabytes to download | Minutes |
+
+The choice can be changed later in Settings. Choosing a cloud provider does not
+limit anything else in the application.
+
+### The hardware check
+
+Choosing Private AI runs a short check of this computer before anything is
+downloaded. It reads the processor, total memory, graphics memory, and free disk
+space, then shows:
+
+- the models this machine can run, each with the reasons it fits and the
+  download size;
+- the models it cannot run, each with the specific reason — typically not enough
+  memory or not enough free disk.
+
+Nothing is hidden. If a model is excluded, the reason is stated so the decision
+is reviewable rather than mysterious.
+
+A model is only offered if it comes from the **signed LexEdge catalogue** of
+legally reviewed models *and* meets two separate technical requirements: a
+context window large enough for real legal documents, and support for the tool
+calls that every chat turn uses. Both are checked independently, because a model
+can satisfy one and fail the other.
+
+The recommended model is pre-selected. It is a recommendation, not a
+restriction — any listed model can be chosen instead, and the total download
+size updates with the selection.
+
+### If no model fits this computer
+
+On a machine that cannot run any approved model, the cloud provider route gives
+a full install with no loss of legal features. Private AI is an addition to the
+product, not a prerequisite for it.
+
+### If Ollama is already installed
+
+Setup detects an existing Ollama installation and reports which of its models
+meet the requirements. LexEdge installs **its own runtime on a separate port**
+and will not modify, reconfigure, or remove an existing installation. A runtime
+on a different machine is deliberately not used, because sending matter
+documents to another host would defeat the purpose of choosing Private AI.
+
+### What gets installed
+
+Private AI provisions a local model runtime and two models — one for generating
+text and one for search indexing. Each download is verified against a published
+checksum before it is used. All of it is managed by the installer; there is no
+separate product to install and no terminal commands to run.
+
 ## Your first legal task
 
 Start with a low-risk, reviewable task:
@@ -101,7 +174,9 @@ For ongoing work, create a [Matter Workspace](matter-workspaces.md) and attach t
 
 LexEdge's backend runs locally by default, but the chosen connectors define where data goes:
 
-- A local model plus local files provides the strongest data-locality posture.
+- **Private AI** plus local files provides the strongest data-locality posture:
+  prompts and matter documents are processed on this machine and are not sent to
+  LexEdge or to a model provider.
 - A cloud model receives the content included in model requests.
 - Gmail, Drive, OCR, research, calendar, Slack, and other connectors receive the data sent to their APIs.
 - n8n can be self-hosted, but its external connectors still cross the firm's privacy boundary.
