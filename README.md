@@ -53,6 +53,13 @@ review are offered. A model is checked for two independent requirements before
 it is proposed: a context window large enough for real legal documents, and
 support for the tool calls every chat turn depends on.
 
+**Private AI needs a capable machine.** 16 GB of RAM is the practical minimum
+and 32 GB is comfortable; 8 GB is not enough and setup will not offer a model
+for it. Memory and disk are checked automatically. Processor speed is not yet
+measured, so an older machine with sufficient RAM can pass the check and still
+answer slowly — a cloud provider will be faster there. Full figures are in the
+[installation guide](docs/desktop-installation.md).
+
 **Private AI is optional, and declining costs nothing.** Setup offers a clear
 choice between Private AI and a cloud provider, explains what each means
 including its trade-offs, and treats the cloud route as a first-class outcome
