@@ -60,6 +60,64 @@ import type {
 const DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS = 30_000
 const SESSION_LIST_REQUEST_TIMEOUT_MS = 60_000
 
+/*
+ * First contact with the backend during onboarding.
+ *
+ * The backend is still warming when the wizard opens: Python is importing, the
+ * model catalogue is loading, and on a slow or low-memory machine that takes
+ * longer than a single request is willing to wait. The default 15s timeout then
+ * surfaces as "Timed out connecting to LexEdge AI backend after 15000ms" on the
+ * setup screen, which reads as a broken install when nothing is actually wrong
+ * — the backend simply had not finished starting.
+ *
+ * Onboarding calls therefore wait longer per attempt and retry while the
+ * failure still looks like a timeout, up to a total budget. Retrying is safe
+ * because every call wrapped here is a read.
+ */
+const ONBOARDING_REQUEST_TIMEOUT_MS = 45_000
+const ONBOARDING_WARMUP_BUDGET_MS = 120_000
+const ONBOARDING_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000]
+
+function looksLikeBackendWarmup(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error ?? '')).toLowerCase()
+  return (
+    message.includes('timed out connecting') ||
+    message.includes('econnrefused') ||
+    message.includes('socket hang up') ||
+    message.includes('backend is not ready') ||
+    message.includes('econnreset')
+  )
+}
+
+/**
+ * Run a read-only backend call, retrying while the backend still appears to be
+ * starting. Any other failure is rethrown immediately — this must not mask a
+ * genuine error behind two minutes of silent retries.
+ */
+export async function withBackendWarmup<T>(call: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + ONBOARDING_WARMUP_BUDGET_MS
+  let attempt = 0
+  for (;;) {
+    try {
+      return await call()
+    } catch (error) {
+      if (!looksLikeBackendWarmup(error) || Date.now() >= deadline) {
+        if (looksLikeBackendWarmup(error)) {
+          throw new Error(
+            'LexEdge is still starting and did not respond in time. This can happen on a ' +
+              'slower computer or the first launch after installing. Close this window and ' +
+              'open LexEdge again; if it keeps happening, open Settings and send the setup log.'
+          )
+        }
+        throw error
+      }
+      const delay = ONBOARDING_RETRY_DELAYS_MS[Math.min(attempt, ONBOARDING_RETRY_DELAYS_MS.length - 1)]
+      attempt += 1
+      await new Promise(resolve => setTimeout(resolve, Math.min(delay, Math.max(0, deadline - Date.now()))))
+    }
+  }
+}
+
 export type {
   ActionResponse,
   ActionStatusResponse,
@@ -841,9 +899,13 @@ export function getProfileSoul(name: string): Promise<ProfileSoul> {
 }
 
 export function getPracticeRoleSoulTemplate(role: string): Promise<PracticeRoleSoulTemplate> {
-  return window.hermesDesktop.api<PracticeRoleSoulTemplate>({
-    path: `/api/profiles/practice-roles/${encodeURIComponent(role)}/soul-template`
-  })
+  // Reached while the backend may still be starting — see withBackendWarmup.
+  return withBackendWarmup(() =>
+    window.hermesDesktop.api<PracticeRoleSoulTemplate>({
+      path: `/api/profiles/practice-roles/${encodeURIComponent(role)}/soul-template`,
+      timeoutMs: ONBOARDING_REQUEST_TIMEOUT_MS
+    })
+  )
 }
 
 export function updateProfileSoul(name: string, content: string): Promise<{ ok: boolean }> {
@@ -876,10 +938,14 @@ export function getUsageAnalytics(days = 30): Promise<AnalyticsResponse> {
 }
 
 export function getGlobalModelOptions(opts?: { refresh?: boolean }): Promise<ModelOptionsResponse> {
-  return window.hermesDesktop.api<ModelOptionsResponse>({
-    ...profileScoped(),
-    path: opts?.refresh ? '/api/model/options?refresh=1' : '/api/model/options'
-  })
+  // Also reached from onboarding against a cold backend — see withBackendWarmup.
+  return withBackendWarmup(() =>
+    window.hermesDesktop.api<ModelOptionsResponse>({
+      ...profileScoped(),
+      path: opts?.refresh ? '/api/model/options?refresh=1' : '/api/model/options',
+      timeoutMs: ONBOARDING_REQUEST_TIMEOUT_MS
+    })
+  )
 }
 
 // Private AI (local Ollama) auto-provisioning. Two distinct actions —
@@ -960,9 +1026,13 @@ export function setGlobalModel(
 }
 
 export function getOnboardingStatus(): Promise<OnboardingStatus> {
-  return window.hermesDesktop.api<OnboardingStatus>({
-    path: '/api/onboarding/status'
-  })
+  // The very first backend call the wizard makes — see withBackendWarmup.
+  return withBackendWarmup(() =>
+    window.hermesDesktop.api<OnboardingStatus>({
+      path: '/api/onboarding/status',
+      timeoutMs: ONBOARDING_REQUEST_TIMEOUT_MS
+    })
+  )
 }
 
 export function updateOnboardingStep(key: string, value: unknown = true): Promise<OnboardingStatus> {

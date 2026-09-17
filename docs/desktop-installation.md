@@ -7,6 +7,11 @@ This guide is for lawyers and legal teams installing the desktop application. De
 - Download only from [lexedge.ai/download-hermes](https://lexedge.ai/download-hermes/) or an official release linked from [Lexedgeai26/legal-hermes](https://github.com/Lexedgeai26/legal-hermes).
 - Use a user account that can install normal desktop applications.
 - Keep a stable internet connection available during the first launch.
+- Check the machine has at least **8 GB of RAM and 10 GB of free disk** for a
+  normal install. To run [Private AI](#what-private-ai-needs-to-run-well) — a
+  legal model on the computer itself — **16 GB of RAM is the practical minimum**
+  and 32 GB is comfortable. A machine below that still runs LexEdge fully using
+  a cloud provider.
 - Have a supported model-provider account or a local model endpoint ready. Provider charges are separate from LexEdge.
 - If a corporate proxy, VPN, antivirus product, or TLS inspection service controls downloads, ask the firm's administrator to allow the installation sources shown in the setup log.
 
@@ -114,6 +119,32 @@ produce a complete, working install; neither is a downgrade.
 
 The choice can be changed later in Settings. Choosing a cloud provider does not
 limit anything else in the application.
+
+### What Private AI needs to run well
+
+Running a legal model locally is demanding. These are the thresholds that matter
+in practice, not just the ones that let it install:
+
+| | Minimum | Recommended |
+| --- | --- | --- |
+| Memory (RAM) | 16 GB | 32 GB or more |
+| Free disk | 12 GB | 20 GB or more |
+| Processor | 4-core, 2018 or later | 8-core, Apple Silicon or recent Intel/AMD |
+| Graphics | not required | a dedicated GPU, or Apple Silicon, makes replies markedly faster |
+
+**8 GB of RAM is not enough.** After the operating system takes its share there
+is not enough left for a model of usable quality, and setup will not offer one.
+
+**Meeting the memory requirement does not guarantee good speed.** Setup checks
+memory and disk, because those decide whether a model can run at all. It does
+not currently measure processor speed, so an older machine with plenty of RAM
+can pass the check and still answer slowly — long pauses before a reply,
+especially on long documents. If that describes the experience, a cloud provider
+will be considerably faster on the same machine.
+
+**On a machine that falls short, choose a cloud provider.** Every legal feature
+works the same way; only the place the model runs changes. That is a better
+outcome than a local model too slow to use.
 
 ### The hardware check
 
