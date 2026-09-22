@@ -155,7 +155,9 @@ JURISDICTIONS = [
     {"legal_system": "Common Law", "country": "India", "state": "Delhi", "region": "New Delhi", "court_type": "High Court", "court": "Delhi High Court"},
     {"legal_system": "Common Law", "country": "India", "state": "Maharashtra", "region": "Mumbai", "court_type": "High Court", "court": "Bombay High Court"},
     {"legal_system": "Common Law", "country": "India", "state": "Karnataka", "region": "Bengaluru", "court_type": "High Court", "court": "Karnataka High Court"},
-    {"legal_system": "Common Law", "country": "India", "state": "India", "region": "New Delhi", "court_type": "Supreme Court", "court": "Supreme Court of India"},
+    # The Supreme Court is national, so it has no state. "India" was used as a
+    # placeholder here and surfaced as an option in the State/Province picker.
+    {"legal_system": "Common Law", "country": "India", "state": "", "region": "New Delhi", "court_type": "Supreme Court", "court": "Supreme Court of India"},
     {"legal_system": "Common Law", "country": "Australia", "state": "Victoria", "region": "Melbourne", "court_type": "Supreme Court", "court": "Supreme Court of Victoria"},
     {"legal_system": "Common Law", "country": "United States", "state": "California", "region": "Federal", "court_type": "District Court", "court": "U.S. District Court"},
     {"legal_system": "Civil Law", "country": "Germany", "state": "Bavaria", "region": "Munich", "court_type": "Regional Court", "court": "Munich Regional Court"},

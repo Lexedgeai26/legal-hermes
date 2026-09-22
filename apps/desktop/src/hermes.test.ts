@@ -131,3 +131,70 @@ describe('backend warm-up retry', () => {
     expect(api.mock.calls.length).toBeGreaterThan(1)
   })
 })
+
+describe('India jurisdiction detection (QA 02-LOW-021)', () => {
+  // Mirrors the wizard's rule. The rows are seeded with an Indian default, so
+  // "any row is India" quietly kept the India-only skill pack unlocked for
+  // practices that had simply *added* their own jurisdiction alongside it.
+  function isIndiaJurisdiction(
+    rows: Array<{ country: string; is_primary?: boolean }>,
+    fallback: string
+  ): boolean {
+    const isIndia = (c: string) => /^(india|in|bharat)$/i.test(c.trim())
+    const primary = rows.filter(r => r.is_primary && r.country.trim())
+    if (primary.length) return primary.some(r => isIndia(r.country))
+    const named = rows.map(r => r.country).filter(c => c.trim())
+    if (named.length) return named.some(isIndia)
+    return fallback.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).some(isIndia)
+  }
+
+  const SEEDED = 'India\nSupreme Court of India\nHigh Court\nDistrict Courts'
+
+  it('locks the pack when the primary jurisdiction is not India', () => {
+    // The reported failure: Germany chosen, seeded India row still present.
+    expect(
+      isIndiaJurisdiction(
+        [
+          { country: 'Germany', is_primary: true },
+          { country: 'India', is_primary: false }
+        ],
+        SEEDED
+      )
+    ).toBe(false)
+  })
+
+  it('offers the pack when the primary jurisdiction is India', () => {
+    expect(
+      isIndiaJurisdiction(
+        [
+          { country: 'India', is_primary: true },
+          { country: 'Germany', is_primary: false }
+        ],
+        SEEDED
+      )
+    ).toBe(true)
+  })
+
+  it('falls back to any row when no primary is marked', () => {
+    // Hiding the pack from a practice that lists an Indian court would be the
+    // worse error, so an unmarked set still counts.
+    expect(isIndiaJurisdiction([{ country: 'Germany' }, { country: 'India' }], '')).toBe(true)
+    expect(isIndiaJurisdiction([{ country: 'Germany' }, { country: 'France' }], '')).toBe(false)
+  })
+
+  it('ignores the seeded free text once real rows exist', () => {
+    // The seeded default must never answer for a user who has entered rows.
+    expect(isIndiaJurisdiction([{ country: 'Australia', is_primary: true }], SEEDED)).toBe(false)
+  })
+
+  it('uses the free text only when no row names a country', () => {
+    expect(isIndiaJurisdiction([], SEEDED)).toBe(true)
+    expect(isIndiaJurisdiction([{ country: '  ' }], 'Australia\nFederal Court')).toBe(false)
+  })
+
+  it('accepts the common spellings', () => {
+    for (const c of ['india', 'INDIA', ' Bharat ', 'IN']) {
+      expect(isIndiaJurisdiction([{ country: c, is_primary: true }], '')).toBe(true)
+    }
+  })
+})
