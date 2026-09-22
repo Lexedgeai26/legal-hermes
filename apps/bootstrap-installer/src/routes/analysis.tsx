@@ -235,9 +235,44 @@ export default function Analysis() {
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {compatible.length === 0 ? (
-          <p className="m-0 text-sm text-muted-foreground">
-            No approved model fits this computer.
-          </p>
+          /* Dead end guard. A machine below the bar previously got one flat
+             sentence, a disabled primary button, and a de-emphasised "Skip"
+             it had to infer was the way out. QA read that as a defect, which
+             is the right reaction: the analysis succeeded, the answer is just
+             "not here", and the product still works completely without Private
+             AI. So the cloud route is promoted to the recommended action and
+             the shortfall is stated in the machine's own numbers. */
+          <div className="rounded-md border border-border bg-muted/30 p-4">
+            <div className="flex items-start gap-2.5">
+              <Info size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <h2 className="m-0 text-sm font-semibold text-foreground">
+                  This computer can&rsquo;t run a local model
+                </h2>
+                <p className="m-0 mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                  Private AI needs more memory or disk than this machine has
+                  &mdash; it has {hardware.memory.totalGb} GB of memory and{' '}
+                  {analysis.freeDiskGb.toFixed(0)} GB free.
+                </p>
+                <p className="m-0 mt-2.5 text-sm leading-relaxed text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    Use a cloud provider instead.
+                  </span>{' '}
+                  Every legal feature works exactly the same; only the place the
+                  model runs changes. You can switch to Private AI later from
+                  Settings if you move to a larger machine.
+                </p>
+                <Button
+                  onClick={() => void chooseCloudProvider()}
+                  size="lg"
+                  className="mt-4 inline-flex items-center gap-2 px-6"
+                >
+                  <Server size={16} />
+                  Continue with a cloud provider
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             {compatible.map((model) => (
@@ -272,7 +307,14 @@ export default function Analysis() {
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border pt-3">
+      {/* The footer's whole purpose is choosing and downloading a model. With
+          nothing installable it would show a permanently disabled primary
+          button under a panel that already offers the real way forward —
+          two competing calls to action, one of them dead. Hide it. */}
+      <div
+        className="shrink-0 border-t border-border pt-3"
+        hidden={compatible.length === 0}
+      >
         <p className="m-0 mb-3 text-xs text-muted-foreground">
           {selected ? (
             <>

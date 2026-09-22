@@ -239,6 +239,11 @@ export interface ProvisionModel {
   config: RuntimeConfigSummary | null
 }
 
+/// True from the moment Cancel is pressed until provisioning actually stops.
+/// Separate from ProvisionModel.status because it describes a pending request,
+/// not a state the backend has confirmed.
+export const $provisionCancelling = atom<boolean>(false)
+
 const PROVISION_INITIAL: ProvisionModel = {
   status: 'idle',
   stages: {},
@@ -274,6 +279,7 @@ async function subscribePrivateAi(): Promise<void> {
           stages[s.name] = { name: s.name, title: s.title, state: null }
           order.push(s.name)
         }
+        $provisionCancelling.set(false)
         $provision.set({ ...PROVISION_INITIAL, status: 'running', stages, stageOrder: order })
         break
       }
@@ -590,6 +596,7 @@ export function selectProfile(profileId: string): void {
 // ---------------------------------------------------------------------------
 
 export async function startProvisioning(profileId: string): Promise<void> {
+  $provisionCancelling.set(false)
   $provision.set({ ...PROVISION_INITIAL, status: 'running' })
   $route.set('provision')
   try {
@@ -603,8 +610,26 @@ export async function startProvisioning(profileId: string): Promise<void> {
   }
 }
 
+/// Ask the backend to stop provisioning.
+///
+/// The final `cancelled` status arrives as a backend event, but a multi-GB
+/// download does not stop the instant the button is pressed — the stage has to
+/// reach a safe point first. Without local state the screen therefore does not
+/// change at all when Cancel is clicked, so the user presses it again, and
+/// again, with no evidence anything is happening. QA reported exactly that
+/// across three cases. This marks the request immediately; the backend event
+/// still decides the outcome.
 export async function cancelProvisioning(): Promise<void> {
-  await invoke('cancel_private_ai_provisioning')
+  if ($provisionCancelling.get()) return
+  $provisionCancelling.set(true)
+  try {
+    await invoke('cancel_private_ai_provisioning')
+  } catch (error) {
+    // The request itself failed, so nothing is stopping — release the flag or
+    // the button stays dead for the rest of the run.
+    $provisionCancelling.set(false)
+    throw error
+  }
 }
 
 /// Resume from the failed stage. Every stage is idempotent on the Rust side,
