@@ -416,10 +416,35 @@ function skillsForLegalGroup(group: (typeof LEGAL_SKILL_GROUPS)[number], skills:
     .sort((a, b) => a.localeCompare(b))
 }
 
-function isIndiaJurisdiction(rows: Array<{ country: string }>, fallback: string): boolean {
-  const countries = rows.length ? rows.map(row => row.country) : linesFromCsv(fallback)
-  return countries.some(country => /^(india|in|bharat)$/i.test(country.trim()))
+/// Whether this practice is an Indian one, which decides whether the
+/// India-only skill pack is offered.
+///
+/// The primary jurisdiction decides when one is marked. The rows are seeded
+/// with an Indian default, so a lawyer who *added* Germany rather than
+/// replacing the seeded row still had an India row present — and matching on
+/// any row therefore kept the Indian pack unlocked for a German practice
+/// (QA 02-LOW-021). Their primary jurisdiction is the honest answer to "what
+/// kind of practice is this"; the other rows are additional forums they also
+/// appear in.
+///
+/// With no primary marked, any row still counts: a practice listing an Indian
+/// court anywhere should be offered the pack rather than have it hidden.
+function isIndiaJurisdiction(
+  rows: Array<{ country: string; is_primary?: boolean }>,
+  fallback: string
+): boolean {
+  const isIndia = (country: string) => /^(india|in|bharat)$/i.test(country.trim())
+  const primary = rows.filter(row => row.is_primary && row.country.trim())
+  if (primary.length) {
+    return primary.some(row => isIndia(row.country))
+  }
+  const named = rows.map(row => row.country).filter(country => country.trim())
+  if (named.length) {
+    return named.some(isIndia)
+  }
+  return linesFromCsv(fallback).some(isIndia)
 }
+
 
 function defaultLegalSkillGroupIds(indiaPractice: boolean): string[] {
   return LEGAL_SKILL_GROUPS.filter(group => !group.indiaOnly || indiaPractice).map(group => group.id)
