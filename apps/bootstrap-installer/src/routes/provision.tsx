@@ -3,6 +3,7 @@ import { Button } from '../components/button'
 import {
   $provision,
   cancelProvisioning,
+  $provisionCancelling,
   continueToSuccess,
   retryProvisioning,
   skipPrivateAi,
@@ -138,6 +139,7 @@ function Report({ report }: { report: ValidationReport }) {
 
 export default function Provision() {
   const p = useStore($provision)
+  const cancelling = useStore($provisionCancelling)
   const running = p.status === 'running'
   const done = p.status === 'completed'
   const stopped = p.status === 'failed' || p.status === 'cancelled'
@@ -185,15 +187,38 @@ export default function Provision() {
           </div>
         )}
 
-        {stopped && p.error && (
+        {/* A cancellation is not a failure and carries no error text, so the
+            error line alone left the screen silent about why it stopped —
+            indistinguishable from a hang. State the outcome explicitly, and
+            in a neutral tone: the user chose this. */}
+        {p.status === 'cancelled' && (
+          <p className="m-0 mt-3 text-sm leading-relaxed text-muted-foreground">
+            Setup was cancelled. Nothing further was downloaded, and what had
+            already downloaded is kept &mdash; resuming continues from where it
+            stopped rather than starting again.
+          </p>
+        )}
+
+        {p.status === 'failed' && p.error && (
           <p className="m-0 mt-3 text-sm leading-relaxed text-destructive">{p.error}</p>
         )}
       </div>
 
       <div className="flex shrink-0 items-center gap-3 border-t border-border pt-3">
         {running && (
-          <Button variant="outline" size="lg" onClick={() => void cancelProvisioning()}>
-            Cancel
+          /* Disabled and relabelled the instant Cancel is pressed. A download
+             stage cannot stop mid-chunk, so without this the screen looks
+             identical after the click and the only rational reading is that
+             the button is broken. */
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => void cancelProvisioning()}
+            disabled={cancelling}
+            className="inline-flex items-center gap-2"
+          >
+            {cancelling && <Loader2 size={15} className="animate-spin" />}
+            {cancelling ? 'Cancelling\u2026' : 'Cancel'}
           </Button>
         )}
         {stopped && (
