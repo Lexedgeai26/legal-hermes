@@ -107,12 +107,13 @@ const EMBEDDING_DOWNLOAD_GB: f64 = 0.7;
 pub async fn analyze_private_ai_options() -> Result<PrivateAiAnalysis, String> {
     let hardware = detect_private_ai_hardware().await?;
 
+    // Debug builds carry a catalogue signed with a seed committed to this
+    // repository, so it is forgeable and trusted only here. Release builds use
+    // the production catalogue, signed with a key held outside the repository.
     #[cfg(debug_assertions)]
     let loaded = crate::catalogue::development_catalogue(&crate::runtime::rfc3339_utc_now())?;
     #[cfg(not(debug_assertions))]
-    let loaded: LoadedCatalogue = return Err(
-        "No signed model catalogue has been provisioned for this build".to_string(),
-    );
+    let loaded = crate::catalogue::production_catalogue(&crate::runtime::rfc3339_utc_now())?;
 
     let request = build_request(&hardware, &loaded, EMBEDDING_DOWNLOAD_GB);
     let free_disk_gb = request.free_disk_gb;

@@ -23,6 +23,8 @@ const SUPPORTED_CATALOGUE_ENVELOPE_VERSION: u32 = 1;
 pub const DEV_SIGNING_SEED: [u8; 32] = [42_u8; 32];
 #[cfg(debug_assertions)]
 pub const DEV_KEY_ID: &str = "lexedge-dev-2026";
+/// Production signing key id. The private half lives outside this repository.
+pub const PROD_KEY_ID: &str = "lexedge-prod-2026";
 
 /// The signed payload. Expiry is inside the signature, so it cannot be edited
 /// without invalidating the whole envelope.
@@ -75,9 +77,18 @@ pub fn trusted_keys() -> TrustedKeySet {
         ));
     }
 
-    // Production keys are provisioned by release engineering and pinned here
-    // before the first signed release. An empty set in a release build means
-    // no catalogue can load, which is the correct fail-closed default.
+    // Production key. Safe to commit: a verifying key can check a signature but
+    // never produce one. Rotation is additive — push the new key here, re-sign,
+    // ship, and only then remove the old entry, so a release never rejects a
+    // catalogue that is still in the field.
+    entries.push((
+        PROD_KEY_ID.to_string(),
+        [
+            41, 53, 126, 234, 231, 98, 166, 67, 146, 145, 99, 11, 33, 222, 202, 167,
+            89, 23, 133, 44, 137, 134, 160, 203, 206, 48, 7, 91, 37, 40, 26, 216,
+        ],
+    ));
+
     TrustedKeySet::from_entries(entries)
 }
 
@@ -138,6 +149,22 @@ pub fn development_catalogue(now_rfc3339: &str) -> Result<LoadedCatalogue, Strin
     load_signed_catalogue(&envelope, now_rfc3339)
 }
 
+/// The catalogue shipped with a release build.
+///
+/// The signed envelope is embedded rather than read from disk: a file beside
+/// the binary could be swapped, and while the signature would catch that, an
+/// embedded payload removes the failure mode entirely and keeps the installer
+/// working with no network. Updating the catalogue therefore means shipping a
+/// release — which is the right trade while `disabledProfiles` can withdraw a
+/// profile and `notAfter` bounds how long any catalogue stays valid.
+#[cfg(not(debug_assertions))]
+pub fn production_catalogue(now_rfc3339: &str) -> Result<LoadedCatalogue, String> {
+    const ENVELOPE: &str = include_str!("../catalogue/production-catalogue.signed.json");
+    let envelope: SignedEnvelope = serde_json::from_str(ENVELOPE)
+        .map_err(|_| "The bundled model catalogue could not be read".to_string())?;
+    load_signed_catalogue(&envelope, now_rfc3339)
+}
+
 /// Lexicographic comparison is correct for RFC 3339 UTC timestamps of equal
 /// shape, which is what we mint. Anything malformed fails closed.
 pub(crate) fn expiry_is_valid(not_after: &str, now: &str) -> bool {
@@ -162,6 +189,47 @@ fn apply_emergency_disablement(catalogue: &mut LegalModelCatalogue, disabled: &[
 
 fn is_selectable(profile: &LegalModelProfile) -> bool {
     profile.enabled && !profile.retired && profile.legal_benchmark.approved
+}
+
+#[cfg(test)]
+mod prod_catalogue_tests {
+    use super::*;
+
+    /// The envelope shipped in release builds must verify against the pinned
+    /// production key. Without this, a mis-signed or truncated catalogue
+    /// compiles perfectly and fails for the first customer who opens the app —
+    /// the exact class of defect that left Private AI unavailable in every
+    /// signed build before this. The payload is embedded the same way the
+    /// release loader embeds it, so the test covers the real bytes.
+    #[test]
+    fn shipped_production_catalogue_verifies_against_the_pinned_key() {
+        const ENVELOPE: &str = include_str!("../catalogue/production-catalogue.signed.json");
+        let envelope: SignedEnvelope =
+            serde_json::from_str(ENVELOPE).expect("bundled catalogue envelope must parse");
+
+        assert_eq!(envelope.key_id, PROD_KEY_ID, "signed with an unexpected key");
+
+        let loaded = load_signed_catalogue(&envelope, "2026-09-23T00:00:00Z")
+            .expect("bundled catalogue must verify against the pinned production key");
+
+        assert!(
+            loaded.catalogue.profiles.iter().any(is_selectable),
+            "a shipped catalogue with no selectable profile leaves Private AI unusable"
+        );
+    }
+
+    /// Expiry is the only thing that bounds how long a withdrawn catalogue
+    /// stays usable, so a shipped one must not already be expired — and must
+    /// not be so far out that the control is inert.
+    #[test]
+    fn shipped_production_catalogue_is_not_expired_today() {
+        const ENVELOPE: &str = include_str!("../catalogue/production-catalogue.signed.json");
+        let envelope: SignedEnvelope = serde_json::from_str(ENVELOPE).unwrap();
+        // A date comfortably past this build but before the catalogue's expiry.
+        assert!(load_signed_catalogue(&envelope, "2027-01-01T00:00:00Z").is_ok());
+        // And it does expire eventually.
+        assert!(load_signed_catalogue(&envelope, "2099-01-01T00:00:00Z").is_err());
+    }
 }
 
 #[cfg(test)]

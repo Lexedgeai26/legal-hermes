@@ -110,9 +110,12 @@ def sign(args: argparse.Namespace) -> None:
     private = _load_private(args.key)
     signature = private.sign(payload)
 
+    # Field names are camelCase: SignedEnvelope in signed_envelope.rs carries
+    # serde(rename_all = "camelCase"), so snake_case keys are rejected outright
+    # at parse time — before any signature is even checked.
     envelope = {
-        "schema_version": ENVELOPE_SCHEMA_VERSION,
-        "key_id": args.key_id,
+        "schemaVersion": ENVELOPE_SCHEMA_VERSION,
+        "keyId": args.key_id,
         "algorithm": ALGORITHM,
         "payload": base64.b64encode(payload).decode(),
         "signature": base64.b64encode(signature).decode(),
@@ -123,8 +126,8 @@ def sign(args: argparse.Namespace) -> None:
     print(f"signed      : {out}")
     print(f"key_id      : {args.key_id}")
     print(f"payload     : {len(payload)} bytes")
-    if "not_after" in catalogue:
-        print(f"expires     : {catalogue['not_after']}")
+    if "notAfter" in catalogue:
+        print(f"expires     : {catalogue['notAfter']}")
     else:
         print("WARNING: catalogue has no not_after — it will never expire.")
 
@@ -134,8 +137,8 @@ def verify(args: argparse.Namespace) -> None:
     pub_raw = base64.b64decode(Path(args.pub).expanduser().read_text().strip())
     public = Ed25519PublicKey.from_public_bytes(pub_raw)
 
-    if envelope.get("schema_version") != ENVELOPE_SCHEMA_VERSION:
-        sys.exit(f"Unsupported schema_version {envelope.get('schema_version')}")
+    if envelope.get("schemaVersion") != ENVELOPE_SCHEMA_VERSION:
+        sys.exit(f"Unsupported schemaVersion {envelope.get('schemaVersion')}")
     if envelope.get("algorithm") != ALGORITHM:
         sys.exit(f"Unsupported algorithm {envelope.get('algorithm')}")
 
@@ -145,13 +148,23 @@ def verify(args: argparse.Namespace) -> None:
     except Exception:
         sys.exit("SIGNATURE INVALID — do not ship this envelope")
 
-    catalogue = json.loads(payload)
+    doc = json.loads(payload)
+    # The envelope wraps an outer document (expiry, embedding model, emergency
+    # disablement) around the catalogue proper — read each field at its own
+    # level rather than guessing, or a present value reads as missing.
+    inner = doc.get("catalogue", {})
+    profiles = inner.get("profiles", [])
     print("signature   : VALID")
-    print(f"key_id      : {envelope['key_id']}")
-    print(f"catalogue   : {catalogue.get('id', '?')} v{catalogue.get('version', '?')}")
-    print(f"expires     : {catalogue.get('not_after', 'never — this is a problem')}")
-    profiles = catalogue.get("profiles") or catalogue.get("catalogue", {}).get("profiles", [])
-    print(f"profiles    : {len(profiles)}")
+    print(f"key_id      : {envelope['keyId']}")
+    print(f"catalogue   : {inner.get('id', '?')} v{inner.get('version', '?')}")
+    print(f"expires     : {doc.get('notAfter', 'never — this is a problem')}")
+    print(f"embedding   : {doc.get('embeddingModel', '?')}")
+    disabled = doc.get("disabledProfiles", [])
+    print(f"profiles    : {len(profiles)}" + (f"  ({len(disabled)} disabled)" if disabled else ""))
+    for prof in profiles:
+        bench = prof.get("legalBenchmark", {})
+        print(f"              - {prof.get('id')}: {prof.get('ollamaModel')}"
+              f"  approved={bench.get('approved')} score={bench.get('score')}")
 
 
 def main() -> None:
