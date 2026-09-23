@@ -200,3 +200,10 @@ docs/local/
 **/private_keys/
 *.mobileprovision
 *.p12
+
+# Catalogue signing private key. The public half is pinned in catalogue.rs and
+# is safe to commit; the private half signs what customers will run and must
+# never enter the repository, even transiently.
+catalogue-signing.key
+*.signing.key
+.lexedge-signing/

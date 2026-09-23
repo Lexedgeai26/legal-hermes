@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "notAfter": "2027-09-23T00:00:00Z",
+  "disabledProfiles": [],
+  "embeddingModel": "embeddinggemma:300m",
+  "embeddingDimensions": 768,
+  "embeddingExpectedDigest": "85462619ee721b466c5927d109d4cb765861907d5417b9109caebc4e614679f1",
+  "embeddingExpectedSizeBytes": 621875501,
+  "catalogue": {
+    "schemaVersion": 1,
+    "id": "legal-desktop",
+    "version": "1.0.0",
+    "profiles": [
+      {
+        "id": "legal-compact",
+        "friendlyName": "Legal Compact",
+        "ollamaModel": "llama3.1:8b",
+        "llmfitAliases": [
+          "llama3.1-8b"
+        ],
+        "minimumRamGb": 8,
+        "recommendedRamGb": 16,
+        "minimumVramGb": 0,
+        "requiresGpu": false,
+        "downloadSizeGb": 4.92,
+        "operationalContextTokens": 131072,
+        "targetTps": 12,
+        "legalBenchmark": {
+          "approved": true,
+          "score": 60,
+          "version": "lexedge-legal-bench-1"
+        },
+        "expectedDigest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+        "expectedSizeBytes": 4920752841
+      }
+    ]
+  }
+}
