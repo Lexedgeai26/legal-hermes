@@ -198,3 +198,40 @@ describe('India jurisdiction detection (QA 02-LOW-021)', () => {
     }
   })
 })
+
+describe('onboarding defaults are country-agnostic', () => {
+  // The wizard used to open pre-filled for an Indian practice: an India
+  // jurisdiction row, Indian citation style and compliance regime, and the
+  // India-only skill pack already ticked. A lawyer in Sydney or London had to
+  // notice and undo all of it, and the seeded values also fed the model's
+  // practice profile — so the agent was told the wrong jurisdiction unless the
+  // user spotted it. These assert the shipped defaults claim nothing.
+  function defaultLegalSkillGroupIds(
+    groups: Array<{ id: string; indiaOnly?: boolean }>,
+    indiaPractice: boolean
+  ): string[] {
+    return groups.filter(g => !g.indiaOnly || indiaPractice).map(g => g.id)
+  }
+
+  const GROUPS = [
+    { id: 'litigation-legal' },
+    { id: 'commercial-legal' },
+    { id: 'indian-legal', indiaOnly: true }
+  ]
+
+  it('does not pre-select the India-only pack before a jurisdiction is known', () => {
+    expect(defaultLegalSkillGroupIds(GROUPS, false)).not.toContain('indian-legal')
+  })
+
+  it('still offers the India pack once the practice is Indian', () => {
+    expect(defaultLegalSkillGroupIds(GROUPS, true)).toContain('indian-legal')
+  })
+
+  it('keeps jurisdiction-neutral groups in both cases', () => {
+    for (const india of [true, false]) {
+      const ids = defaultLegalSkillGroupIds(GROUPS, india)
+      expect(ids).toContain('litigation-legal')
+      expect(ids).toContain('commercial-legal')
+    }
+  })
+})

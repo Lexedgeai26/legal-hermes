@@ -48,8 +48,9 @@ that will not run are listed separately with the specific reason — not enough
 memory, not enough disk — rather than being silently hidden. The download size
 is stated before anything is downloaded.
 
-Only models from a **signed LexEdge catalogue** that have passed legal benchmark
-review are offered. A model is checked for two independent requirements before
+Only models from a **signed LexEdge catalogue** are offered — a fixed, tested
+set that LexEdge controls, rather than whatever a machine happens to have
+installed. A model is checked for two independent requirements before
 it is proposed: a context window large enough for real legal documents, and
 support for the tool calls every chat turn depends on.
 
