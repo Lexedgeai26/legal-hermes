@@ -1,5 +1,6 @@
 import { atom, computed } from 'nanostores'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 
 /*
@@ -116,6 +117,11 @@ export interface ModelRecommendation {
   quantization: string | null
   estimatedTokensPerSecond: number | null
   estimatedMemoryGb: number | null
+  /** Catalogue requirements, always present — unlike the estimates above,
+   *  which depend on a fit report that production builds do not produce. */
+  minimumRamGb: number
+  recommendedRamGb: number
+  targetTokensPerSecond: number
   downloadSizeGb: number
   operationalContextTokens: number
   recommended: boolean
@@ -491,7 +497,9 @@ export async function startInstall(opts?: { branch?: string }): Promise<void> {
       commit: null,
       branch: opts?.branch ?? null,
       include_desktop: true,
-      hermes_home: null
+      // A folder the user chose to keep an existing install intact. Null is
+      // the default location, which is the ordinary case.
+      hermes_home: $alternateHome.get()
     }
   })
 }
@@ -525,6 +533,42 @@ export async function openLogDir(): Promise<void> {
 
 /// Move from Welcome into the Private AI explanation. Nothing is installed and
 /// nothing is detected until the user has read what local inference means.
+export interface ExistingInstall {
+  found: boolean
+  hermesHome: string
+  installRoot: string | null
+}
+
+/// What is already installed at the default location, and where.
+export const $existingInstall = atom<ExistingInstall | null>(null)
+
+/// A user-chosen Hermes home, set when someone opts to install alongside an
+/// existing copy rather than over it. Null means the default location.
+export const $alternateHome = atom<string | null>(null)
+
+/// Check for an existing install before anything is written.
+///
+/// Installing over an existing setup silently replaces its configuration and
+/// matter metadata. The user is told and offered a separate folder, so a
+/// working install is never destroyed by someone simply running setup again.
+export async function checkExistingInstall(): Promise<void> {
+  try {
+    $existingInstall.set(await invoke<ExistingInstall>('detect_existing_install'))
+  } catch {
+    // A failed probe must not block setup: the worst case is the behaviour
+    // that shipped before this check existed.
+    $existingInstall.set(null)
+  }
+}
+
+/// Choose a different Hermes home so both installs can coexist.
+export async function chooseAlternateHome(): Promise<void> {
+  const picked = await open({ directory: true, multiple: false, title: 'Choose a folder for this install' })
+  if (typeof picked === 'string' && picked.trim()) {
+    $alternateHome.set(picked)
+  }
+}
+
 export function beginPrivateAiChoice(): void {
   $privateAiChoice.set('undecided')
   $analysisError.set(null)

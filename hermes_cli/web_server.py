@@ -4478,13 +4478,35 @@ def _persist_private_ai_provider_entry() -> None:
         _log.debug("private-ai-local provider registration skipped", exc_info=True)
 
 
+# Imported here rather than inside each route: the job worker below has to
+# catch it, and a local import would not be in scope there.
+from hermes_cli.private_ai_provision import ProvisionCancelled  # noqa: E402
+
 _private_ai_progress_lock = threading.Lock()
-_private_ai_progress: dict = {"active": False, "stage": "", "detail": "", "percent": None, "done": False, "error": None}
+_private_ai_progress: dict = {
+    "active": False,
+    "stage": "",
+    "detail": "",
+    "percent": None,
+    "done": False,
+    "error": None,
+    # Set the moment the user asks to stop, and reported back so the UI can say
+    # "cancelling" while a download reaches a safe point. Distinct from
+    # "cancelled", which is the outcome once the worker has actually stopped.
+    "cancelRequested": False,
+    "cancelled": False,
+}
 
 
 def _private_ai_on_progress(stage: str, detail: str, percent: Optional[float]) -> None:
     with _private_ai_progress_lock:
         _private_ai_progress.update(stage=stage, detail=detail, percent=percent)
+
+
+def _private_ai_cancel_requested() -> bool:
+    """Polled by the provisioning worker at its safe stopping points."""
+    with _private_ai_progress_lock:
+        return bool(_private_ai_progress.get("cancelRequested"))
 
 
 def _run_private_ai_job(fn) -> bool:
@@ -4497,12 +4519,20 @@ def _run_private_ai_job(fn) -> bool:
     with _private_ai_progress_lock:
         if _private_ai_progress["active"]:
             return False
-        _private_ai_progress.update(active=True, stage="", detail="", percent=None, done=False, error=None)
+        _private_ai_progress.update(
+            active=True, stage="", detail="", percent=None, done=False, error=None,
+            cancelRequested=False, cancelled=False,
+        )
 
     def _worker() -> None:
         try:
-            fn(_private_ai_on_progress)
+            fn(_private_ai_on_progress, _private_ai_cancel_requested)
             _persist_private_ai_provider_entry()
+        except ProvisionCancelled:
+            # The user's own decision, not a failure: recorded as cancelled and
+            # left without an error, so the UI does not present it as a fault.
+            with _private_ai_progress_lock:
+                _private_ai_progress.update(cancelled=True, stage="cancelled", detail="Setup was cancelled")
         except Exception as exc:  # ProvisionError or anything unexpected
             with _private_ai_progress_lock:
                 _private_ai_progress.update(error=str(exc))
@@ -4563,6 +4593,36 @@ async def start_private_ai(request: Request):
     if not started:
         return {"started": False, "message": "Private AI is already starting."}
     return {"started": True}
+
+
+@app.get("/api/private-ai/capability")
+async def private_ai_capability():
+    """Whether this machine can run the default Private AI profile.
+
+    Checked before offering setup: a machine that cannot run a local model
+    should be routed to a cloud provider, which is a complete product, rather
+    than allowed to download several gigabytes and discover the problem
+    afterwards.
+    """
+    from hermes_cli.private_ai_provision import check_system_capability
+
+    return check_system_capability()
+
+
+@app.post("/api/private-ai/provision/cancel")
+async def cancel_private_ai_provision():
+    """Ask an in-flight Private AI job to stop.
+
+    Returns immediately. A multi-gigabyte download cannot stop mid-chunk, so
+    the worker finishes the chunk it is on and then raises; the UI shows
+    "cancelling" from the moment this returns, using cancelRequested in the
+    status payload, rather than appearing to do nothing.
+    """
+    with _private_ai_progress_lock:
+        if not _private_ai_progress["active"]:
+            return {"cancelling": False, "message": "No Private AI setup is running."}
+        _private_ai_progress.update(cancelRequested=True)
+    return {"cancelling": True}
 
 
 @app.get("/api/private-ai/provision/status")

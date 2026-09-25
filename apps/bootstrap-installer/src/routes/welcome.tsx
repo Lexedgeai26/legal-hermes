@@ -1,7 +1,15 @@
 import { type CSSProperties } from 'react'
 import { Button } from '../components/button'
-import { beginPrivateAiChoice } from '../store'
-import { ArrowRight, HardDrive, Cloud, Cpu } from 'lucide-react'
+import { useStore } from '@nanostores/react'
+import { useEffect } from 'react'
+import {
+  $alternateHome,
+  $existingInstall,
+  beginPrivateAiChoice,
+  checkExistingInstall,
+  chooseAlternateHome
+} from '../store'
+import { ArrowRight, HardDrive, Cloud, Cpu, AlertTriangle, FolderOpen } from 'lucide-react'
 import appIcon from '../assets/lexedge-app-icon.png'
 
 /*
@@ -40,6 +48,13 @@ const PATHS = [
 ]
 
 export default function Welcome() {
+  const existing = useStore($existingInstall)
+  const alternateHome = useStore($alternateHome)
+
+  useEffect(() => {
+    void checkExistingInstall()
+  }, [])
+
   return (
     <div className="hermes-fade-in flex h-full flex-col items-center justify-center gap-10 px-12 py-10">
       {/* Hero — same recipe the desktop's chat/intro.tsx uses */}
@@ -104,6 +119,44 @@ export default function Welcome() {
           </span>
         </p>
       </div>
+
+      {/* Installing over an existing setup replaces its configuration and
+          matter metadata without asking. Someone re-running setup to repair
+          something should not lose a working install, so the choice is made
+          explicit before anything is written. */}
+      {existing?.found && (
+        <div className="w-full max-w-xl rounded-lg border border-border bg-muted/30 p-4 text-left">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="m-0 text-sm font-semibold text-foreground">
+                LexEdge is already installed on this computer
+              </p>
+              <p className="m-0 mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                Found at <code className="text-xs">{existing.installRoot}</code>. Continuing will
+                update it in place, replacing its settings and matter records.
+              </p>
+              {alternateHome ? (
+                <p className="m-0 mt-2.5 text-sm leading-relaxed text-foreground">
+                  Installing a separate copy in{' '}
+                  <code className="text-xs">{alternateHome}</code> instead — the existing install
+                  is left untouched.
+                </p>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void chooseAlternateHome()}
+                  className="mt-3 inline-flex items-center gap-2"
+                >
+                  <FolderOpen size={15} />
+                  Install alongside it in another folder
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <Button
         onClick={() => beginPrivateAiChoice()}

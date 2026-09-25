@@ -13,6 +13,8 @@ import {
   getGlobalModelOptions,
   getOnboardingStatus,
   getPracticeRoleSoulTemplate,
+  getPrivateAICapability,
+  cancelPrivateAIProvision,
   getPrivateAIProvisionStatus,
   getRecommendedDefaultModel,
   getSkills,
@@ -25,7 +27,7 @@ import {
   updateProfileSoul,
   validateProviderCredential
 } from '@/hermes'
-import type { PrivateAIProvisionStatus } from '@/hermes'
+import type { PrivateAICapability, PrivateAIProvisionStatus } from '@/hermes'
 import { CheckCircle2, KeyRound, Loader2, MessageCircle, Users } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { ensureGatewayProfile } from '@/store/profile'
@@ -432,6 +434,25 @@ function skillsForLegalGroup(group: (typeof LEGAL_SKILL_GROUPS)[number], skills:
 ///
 /// With no primary marked, any row still counts: a practice listing an Indian
 /// court anywhere should be offered the pack rather than have it hidden.
+/// The stages Private AI provisioning reports, in the order they run.
+///
+/// The screen previously showed a single bar and a line of detail, so a user
+/// watching a multi-gigabyte install could not tell which of eight steps they
+/// were on, how many remained, or whether anything had completed (QA
+/// 01-SIT-017). The names match those emitted by
+/// hermes_cli/private_ai_provision.py; an unrecognised stage simply does not
+/// highlight a row rather than breaking the list.
+const PRIVATE_AI_STAGES: Array<{ id: string; label: string }> = [
+  { id: 'resolve', label: 'Check the approved runtime' },
+  { id: 'download-runtime', label: 'Download the runtime' },
+  { id: 'install-runtime', label: 'Install the runtime' },
+  { id: 'start-runtime', label: 'Start the runtime' },
+  { id: 'install-generation-model', label: 'Download the legal model' },
+  { id: 'install-embedding-model', label: 'Download the document-search model' },
+  { id: 'validate', label: 'Verify the models' },
+  { id: 'complete', label: 'Finish setup' }
+]
+
 function isIndiaJurisdiction(
   rows: Array<{ country: string; is_primary?: boolean }>,
   fallback: string
@@ -574,6 +595,10 @@ export function LawyerOnboardingWizard({
   const [apiKey, setApiKey] = useState('')
   const [privateAiJob, setPrivateAiJob] = useState<PrivateAIProvisionStatus | null>(null)
   const [privateAiJobError, setPrivateAiJobError] = useState<string | null>(null)
+  // Null until checked. Private AI is offered only once the machine is known
+  // to be able to run it — an 8 GB laptop previously got the full setup button
+  // and discovered the problem several gigabytes into a download.
+  const [privateAiCapability, setPrivateAiCapability] = useState<PrivateAICapability | null>(null)
   const [modelSelection, setModelSelection] = useState<null | { model: string; provider: string }>(null)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [aiDisclaimerAccepted, setAiDisclaimerAccepted] = useState(false)
@@ -726,7 +751,37 @@ export function LawyerOnboardingWizard({
     })
   }, [jurisdictionRows, jurisdictions])
 
+  useEffect(() => {
+    let cancelled = false
+    getPrivateAICapability()
+      .then(result => {
+        if (!cancelled) setPrivateAiCapability(result)
+      })
+      .catch(() => {
+        // A machine we could not measure is not blocked: refusing on a failed
+        // probe would be worse than letting a capable machine try.
+        if (!cancelled) setPrivateAiCapability(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const privateAiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  /// Ask the running Private AI job to stop.
+  ///
+  /// The poll below keeps running: the job reports cancelRequested straight
+  /// away and cancelled once it has actually stopped, so the UI reflects both
+  /// the request and the outcome without guessing at either.
+  async function cancelPrivateAiJob(): Promise<void> {
+    try {
+      await cancelPrivateAIProvision()
+      setPrivateAiJob(current => (current ? { ...current, cancelRequested: true } : current))
+    } catch (err) {
+      setPrivateAiJobError(err instanceof Error ? err.message : 'Could not cancel Private AI setup.')
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -1274,33 +1329,134 @@ export function LawyerOnboardingWizard({
                   <div className="mt-8 max-w-xl">
                     {privateAiJob?.active ? (
                       <div className="rounded-[6px] border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {privateAiJob.detail || 'Working...'}
+                        {(() => {
+                          const currentIndex = PRIVATE_AI_STAGES.findIndex(
+                            stage => stage.id === privateAiJob.stage
+                          )
+                          return (
+                            <>
+                              <div className="flex items-center justify-between text-sm font-medium">
+                                <span className="flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  {privateAiJob.detail || 'Working...'}
+                                </span>
+                                {currentIndex >= 0 && (
+                                  <span className="text-(--ui-text-secondary)">
+                                    Step {currentIndex + 1} of {PRIVATE_AI_STAGES.length}
+                                  </span>
+                                )}
+                              </div>
+                              {privateAiJob.percent != null && (
+                                <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                                  <div
+                                    className="h-full rounded-full bg-primary transition-all"
+                                    style={{ width: `${Math.min(100, Math.max(0, privateAiJob.percent))}%` }}
+                                  />
+                                </div>
+                              )}
+                              <ol className="mt-4 space-y-1.5">
+                                {PRIVATE_AI_STAGES.map((stage, index) => {
+                                  // Before the first recognised stage arrives
+                                  // nothing is marked done, so an unknown stage
+                                  // never reports false progress.
+                                  const done = currentIndex >= 0 && index < currentIndex
+                                  const active = index === currentIndex
+                                  return (
+                                    <li
+                                      className={cn(
+                                        'flex items-center gap-2 text-sm',
+                                        done && 'text-(--ui-text-secondary)',
+                                        active && 'font-medium text-slate-900',
+                                        !done && !active && 'text-slate-400'
+                                      )}
+                                      key={stage.id}
+                                    >
+                                      <span aria-hidden className="w-4 text-center">
+                                        {done ? '✓' : active ? '•' : '·'}
+                                      </span>
+                                      <span>{stage.label}</span>
+                                      {active && privateAiJob.percent != null && (
+                                        <span className="text-(--ui-text-secondary)">
+                                          {Math.round(privateAiJob.percent)}%
+                                        </span>
+                                      )}
+                                    </li>
+                                  )
+                                })}
+                              </ol>
+                            </>
+                          )
+                        })()}
+                        {/* Setup downloads several gigabytes; without a way to
+                            stop it the only escape was quitting the app
+                            mid-install. The button reports the request
+                            immediately because a download cannot stop
+                            mid-chunk, and a screen that does not change reads
+                            as a broken button. */}
+                        <div className="mt-4 flex items-center gap-3">
+                          <Button
+                            disabled={Boolean(privateAiJob.cancelRequested)}
+                            onClick={() => void cancelPrivateAiJob()}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {privateAiJob.cancelRequested ? 'Cancelling...' : 'Cancel'}
+                          </Button>
+                          {privateAiJob.cancelRequested && (
+                            <span className="text-sm text-(--ui-text-secondary)">
+                              Stopping after the current step finishes.
+                            </span>
+                          )}
                         </div>
-                        {privateAiJob.percent != null && (
-                          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${Math.min(100, Math.max(0, privateAiJob.percent))}%` }}
-                            />
-                          </div>
-                        )}
                       </div>
                     ) : (
                       <>
-                        <Button
-                          disabled={busy}
-                          onClick={() => runPrivateAiJob(selectedProvider.status === 'not_setup' ? 'provision' : 'start')}
-                          type="button"
-                        >
-                          {selectedProvider.status === 'not_setup' ? 'Set up Private AI' : 'Start Private AI'}
-                        </Button>
-                        <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
-                          {selectedProvider.status === 'not_setup'
-                            ? 'Downloads and runs a local AI model on this computer. No API key, address, or port needed — nothing leaves this machine.'
-                            : 'Restarts the local AI model already installed on this computer. No download needed.'}
-                        </p>
+                        {/* A machine that cannot run a local model is told so
+                            before it downloads anything, and pointed at the
+                            cloud route — which is a complete product, not a
+                            degraded one. Starting an already-installed runtime
+                            stays available regardless: the models are there,
+                            and refusing would strand an existing install. */}
+                        {selectedProvider.status === 'not_setup' &&
+                        privateAiCapability &&
+                        !privateAiCapability.capable ? (
+                          <div className="rounded-[6px] border border-amber-200 bg-amber-50 p-4">
+                            <p className="m-0 text-sm font-medium text-slate-900">
+                              This computer can&rsquo;t run Private AI
+                            </p>
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-(--ui-text-secondary)">
+                              {privateAiCapability.reasons.map(reason => (
+                                <li key={reason}>{reason}</li>
+                              ))}
+                            </ul>
+                            <p className="mt-3 text-sm leading-6 text-(--ui-text-secondary)">
+                              Choose a cloud provider above instead. Every legal feature works the
+                              same way; only the place the model runs changes.
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <Button
+                              disabled={busy}
+                              onClick={() => runPrivateAiJob(selectedProvider.status === 'not_setup' ? 'provision' : 'start')}
+                              type="button"
+                            >
+                              {selectedProvider.status === 'not_setup' ? 'Set up Private AI' : 'Start Private AI'}
+                            </Button>
+                            <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
+                              {selectedProvider.status === 'not_setup'
+                                ? 'Downloads and runs a local AI model on this computer. No API key, address, or port needed — nothing leaves this machine.'
+                                : 'Restarts the local AI model already installed on this computer. No download needed.'}
+                            </p>
+                          </>
+                        )}
+                        {privateAiJob?.cancelled && !privateAiJobError && (
+                          <p className="mt-2 text-sm text-(--ui-text-secondary)">
+                            Private AI setup was cancelled. Nothing further was downloaded, and
+                            you can start it again at any time or continue with a cloud provider.
+                          </p>
+                        )}
                         {privateAiJobError && <p className="mt-2 text-sm text-red-600">{privateAiJobError}</p>}
                       </>
                     )}
