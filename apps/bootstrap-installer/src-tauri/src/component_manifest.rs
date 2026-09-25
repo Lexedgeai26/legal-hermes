@@ -145,6 +145,19 @@ fn validate_component(component: &Component) -> Result<(), String> {
     Ok(())
 }
 
+/// The component manifest shipped with a release build.
+///
+/// Embedded for the same reasons as the catalogue: a file beside the binary
+/// could be swapped, and the installer must work with no network before it has
+/// anything to download from.
+#[cfg(not(debug_assertions))]
+pub fn production_component_manifest(now_rfc3339: &str) -> Result<ComponentManifest, String> {
+    const ENVELOPE: &str = include_str!("../catalogue/production-components.signed.json");
+    let envelope: SignedEnvelope = serde_json::from_str(ENVELOPE)
+        .map_err(|_| "The bundled component manifest could not be read".to_string())?;
+    load_signed_component_manifest(&envelope, now_rfc3339)
+}
+
 /// Development manifest pointing at official Ollama release artifacts, signed
 /// at runtime with the debug-only key. Release builds cannot mint one and must
 /// be provisioned with a manifest signed by release engineering.

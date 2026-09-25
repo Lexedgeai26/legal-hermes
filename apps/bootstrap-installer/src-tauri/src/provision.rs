@@ -254,10 +254,10 @@ fn resolve_plan(profile_id: &str) -> Result<Plan, String> {
         component_manifest::development_component_manifest(&now)?,
     );
     #[cfg(not(debug_assertions))]
-    let (loaded, manifest): (LoadedCatalogue, component_manifest::ComponentManifest) = {
-        let _ = now;
-        return Err("No signed catalogue or component manifest has been provisioned for this build".to_string());
-    };
+    let (loaded, manifest) = (
+        crate::catalogue::production_catalogue(&now)?,
+        component_manifest::production_component_manifest(&now)?,
+    );
 
     let profile = loaded
         .catalogue
