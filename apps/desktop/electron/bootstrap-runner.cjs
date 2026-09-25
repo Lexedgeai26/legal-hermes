@@ -289,11 +289,35 @@ async function resolveInstallScript({ installStamp, sourceRepoRoot, hermesHome, 
   }
 
   // 2. Packaged path: download from GitHub at the pinned commit (1B's stamp).
-  if (!installStamp || !installStamp.commit || !STAMP_COMMIT_RE.test(installStamp.commit)) {
+  //
+  // A build produced from a ZIP install has no commit — install.ps1 falls back
+  // to the archive when git clone fails, leaving a repository with a branch but
+  // no commits. Refusing outright there would make a machine that already
+  // struggled to clone unable to bootstrap at all, so the branch is used
+  // instead. A commit is still preferred: it is immutable, where a branch
+  // tracks HEAD and can move under a cached script.
+  const hasCommit =
+    installStamp && installStamp.commit && STAMP_COMMIT_RE.test(installStamp.commit)
+  const hasBranch = installStamp && typeof installStamp.branch === 'string' && installStamp.branch.trim()
+  if (!hasCommit && !hasBranch) {
     throw new Error(
       `Cannot resolve ${installScriptName()}: no SOURCE_REPO_ROOT and no install stamp. ` +
         'This packaged build was produced without a valid build-time stamp.'
     )
+  }
+  if (!hasCommit) {
+    // The raw URL accepts a branch as readily as a SHA; it is simply mutable,
+    // so the file is re-fetched each time rather than cached under a ref that
+    // can move.
+    const ref = installStamp.branch.trim()
+    emit({
+      type: 'log',
+      line: `[bootstrap] no pinned commit (${installStamp.source || 'unknown'} build); using branch ${ref}`
+    })
+    const dest = cachedScriptPath(hermesHome, `branch-${ref.replace(/[^\w.-]/g, '-')}`)
+    await _download(ref, dest)
+    emit({ type: 'log', line: `[bootstrap] saved to ${dest}` })
+    return { path: dest, source: 'download', commit: null, branch: ref, kind: installScriptKind() }
   }
 
   const cached = cachedScriptPath(hermesHome, installStamp.commit)

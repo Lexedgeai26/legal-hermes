@@ -407,7 +407,8 @@ export async function initialize(): Promise<void> {
           error: null,
           logs: []
         })
-        $route.set('progress')
+        $installCancelling.set(false)
+  $route.set('progress')
         break
       }
       case 'stage': {
@@ -491,6 +492,7 @@ export async function startInstall(opts?: { branch?: string }): Promise<void> {
   // Reset before kicking off so a retry from the failure screen clears
   // the previous run's state.
   $bootstrap.set(INITIAL)
+  $installCancelling.set(false)
   $route.set('progress')
   await invoke('start_bootstrap', {
     args: {
@@ -509,12 +511,31 @@ export async function startUpdate(): Promise<void> {
   // there's no welcome click. Reset + jump straight to progress, then let the
   // Rust side stream the synthetic update manifest.
   $bootstrap.set(INITIAL)
+  $installCancelling.set(false)
   $route.set('progress')
   await invoke('start_update')
 }
 
+/// True from the moment Cancel is pressed on the base install until it stops.
+///
+/// The backend does honour cancellation — it is checked between stages and
+/// each stage is given a cancel receiver — but a stage already running (a
+/// dependency install, a desktop build) has to reach a safe point first. With
+/// no local state the screen did not change at all on click, so the button
+/// read as broken and was reported as such.
+export const $installCancelling = atom<boolean>(false)
+
 export async function cancelInstall(): Promise<void> {
-  await invoke('cancel_bootstrap')
+  if ($installCancelling.get()) return
+  $installCancelling.set(true)
+  try {
+    await invoke('cancel_bootstrap')
+  } catch (error) {
+    // Nothing is stopping, so release the flag rather than leaving the button
+    // dead for the rest of the run.
+    $installCancelling.set(false)
+    throw error
+  }
 }
 
 export async function launchHermesDesktop(): Promise<void> {
