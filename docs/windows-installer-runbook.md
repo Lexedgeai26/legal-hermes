@@ -27,6 +27,34 @@ Why this path:
 - We avoid duplicating dependency logic in NSIS.
 - The same repair flow works after install if a dependency is missing or corrupted.
 
+## Building the setup installer (Tauri)
+
+**This is a different application from the Electron desktop app below.** Only
+the setup installer (`apps/bootstrap-installer`) has the Private AI and cloud
+choice screens; `apps/desktop` is the product it installs and has never had
+them. Building the wrong one presents as a missing feature, and has been
+reported as such twice.
+
+Use the script, which refuses to build the wrong app or stale code and stamps
+the commit into the filename:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File apps\bootstrap-installer\tools\build-windows.ps1
+```
+
+It checks that `tauri.conf.json` names the `nsis` target — without it the build
+succeeds and silently produces no installer — verifies the branch is not behind
+`origin`, warns on uncommitted changes, and writes to `dist-windows\` as
+`LexEdge-Hermes-Agent-Setup-0.0.1-Windows-<arch>-<commit>.exe`.
+
+Prerequisites: Windows 10/11, Rust via rustup, Visual Studio Build Tools with
+the "Desktop development with C++" workload, Node 20+. Tauri downloads NSIS on
+first build, so allow it network access.
+
+x64 and arm64 are separate builds. The Private AI runtime pins a different
+Ollama artifact per architecture, so a mismatched build fails during
+provisioning in a way that looks like a product bug.
+
 ## Current build commands
 
 Cross-build ZIP on macOS:
