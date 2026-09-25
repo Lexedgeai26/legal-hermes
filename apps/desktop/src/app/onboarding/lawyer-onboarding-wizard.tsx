@@ -307,10 +307,13 @@ function detectBrowserLanguage(): string {
 }
 
 function detectBrowserTimeZone(): string {
+  // UTC, not a regional guess. The browser answers correctly almost always;
+  // when it cannot, a neutral fallback is honest where a specific city is a
+  // silent assertion about where the user practises.
   if (typeof Intl === 'undefined') {
-    return 'Asia/Kolkata'
+    return 'UTC'
   }
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata'
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
 function normaliseProfileName(value: string): string {
@@ -518,13 +521,19 @@ export function LawyerOnboardingWizard({
   const [mobileNumber, setMobileNumber] = useState('')
   const [practiceAddress, setPracticeAddress] = useState('')
   const [practiceContact, setPracticeContact] = useState('')
-  const [jurisdictions, setJurisdictions] = useState('India\nSupreme Court of India\nHigh Court\nDistrict Courts')
+  // Empty by design. A seeded value here is not a convenience: it is an answer
+  // given on the lawyer's behalf, and it decided which legal skills they were
+  // offered. The wizard already refuses to continue without a jurisdiction, so
+  // an empty start asks the question instead of presuming it.
+  const [jurisdictions, setJurisdictions] = useState('')
   const [positionTitle, setPositionTitle] = useState('')
   const [barRegistrationNumber, setBarRegistrationNumber] = useState('')
   const [yearsExperience, setYearsExperience] = useState('')
   const [primaryLanguage, setPrimaryLanguage] = useState(() => detectBrowserLanguage())
   const [timeZone, setTimeZone] = useState(() => detectBrowserTimeZone())
-  const [professionalRoles, setProfessionalRoles] = useState<string[]>(['Advocate'])
+  // "Advocate" is the Indian and wider Commonwealth term; a US attorney or an
+  // England-and-Wales solicitor is neither. Left for the user to state.
+  const [professionalRoles, setProfessionalRoles] = useState<string[]>([])
   const [secondaryLanguages, setSecondaryLanguages] = useState<string[]>([])
   const [legalSystem, setLegalSystem] = useState('Common Law')
   const [draftingStyle, setDraftingStyle] = useState('Formal')
@@ -533,35 +542,31 @@ export function LawyerOnboardingWizard({
   const [practiceAreas, setPracticeAreas] = useState<string[]>(['Civil Litigation'])
   const [clientTypes, setClientTypes] = useState<string[]>(['Individuals'])
   const [workTypes, setWorkTypes] = useState<string[]>(['Litigation', 'Drafting', 'Legal Research'])
-  const [courtTypes, setCourtTypes] = useState<string[]>(['High Court'])
-  const [citationStyles, setCitationStyles] = useState<string[]>(['Indian Neutral Citation'])
-  const [complianceFrameworks, setComplianceFrameworks] = useState<string[]>(['India DPDP Act'])
+  const [courtTypes, setCourtTypes] = useState<string[]>([])
+  // Citation style and compliance regime are jurisdiction-specific, so there is
+  // no sensible default before the jurisdiction is known — and a wrong one is
+  // worse than none, because a ticked box reads as advice about which rules
+  // apply. Both are free-choice lists the lawyer completes.
+  const [citationStyles, setCitationStyles] = useState<string[]>([])
+  const [complianceFrameworks, setComplianceFrameworks] = useState<string[]>([])
   const [documentTypes, setDocumentTypes] = useState<string[]>(['Petition', 'Affidavit', 'Legal Opinion'])
   const [notificationPreferences, setNotificationPreferences] = useState<string[]>(['Court Updates', 'Judgment Updates'])
   const [jurisdictionRows, setJurisdictionRows] = useState<
     Array<{ bench: string; country: string; court: string; court_type: string; is_primary: boolean; legal_system: string; region: string; state: string }>
-  >([
-    {
-      bench: '',
-      country: 'India',
-      court: 'Supreme Court of India',
-      court_type: 'Supreme Court',
-      is_primary: true,
-      legal_system: 'Common Law',
-      region: 'New Delhi',
-      state: 'India'
-    }
-  ])
+  >([])
   const [jurisdictionDraft, setJurisdictionDraft] = useState({
     bench: '',
-    country: 'India',
-    court: 'Supreme Court of India',
-    court_type: 'Supreme Court',
-    legal_system: 'Common Law',
-    region: 'New Delhi',
-    state: 'India'
+    country: '',
+    court: '',
+    court_type: '',
+    legal_system: '',
+    region: '',
+    state: ''
   })
-  const [selectedSkillGroups, setSelectedSkillGroups] = useState<string[]>(() => defaultLegalSkillGroupIds(true))
+  // Start without the India-only pack: it is enabled by the effect below once a
+  // jurisdiction actually says India. Pre-selecting it meant a German or
+  // Australian practice began onboarding with Indian statutory skills ticked.
+  const [selectedSkillGroups, setSelectedSkillGroups] = useState<string[]>(() => defaultLegalSkillGroupIds(false))
   const [selectedCapabilityGroups, setSelectedCapabilityGroups] = useState<string[]>([])
   const [soul, setSoul] = useState('')
   const [providers, setProviders] = useState<ModelOptionProvider[]>([])
@@ -667,7 +672,7 @@ export function LawyerOnboardingWizard({
           setPracticeCatalog(catalog)
           setPositionTitle(current => current || catalog.options.position_titles?.[0] || '')
           setPrimaryLanguage(current => current || catalog.options.languages?.[0] || 'English')
-          setTimeZone(current => current || catalog.options.time_zones?.[0] || 'Asia/Kolkata')
+          setTimeZone(current => current || catalog.options.time_zones?.[0] || 'UTC')
           setLegalSystem(current => current || catalog.options.legal_systems?.[0] || 'Common Law')
           setDraftingStyle(current => current || catalog.options.drafting_styles?.[0] || 'Formal')
           setWritingPreference(current => current || catalog.options.writing_preferences?.[1] || catalog.options.writing_preferences?.[0] || 'Balanced')

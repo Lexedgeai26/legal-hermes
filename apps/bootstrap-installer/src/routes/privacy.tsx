@@ -39,7 +39,12 @@ const PRIVATE_POINTS = [
   {
     icon: ShieldCheck,
     title: 'Only approved models',
-    body: 'Models come from a signed LexEdge catalogue that has passed legal benchmark review.'
+    // Deliberately claims selection and testing, not a formal benchmark. The
+    // catalogue carries a legalBenchmark score, but no independent legal
+    // benchmark has been run against these models yet, and a product sold to
+    // lawyers should not assert a review it cannot evidence. Restore the
+    // stronger wording once a real benchmark exists.
+    body: 'Models come from a signed LexEdge catalogue — a fixed, tested set, not whatever happens to be on the machine.'
   },
   {
     icon: HardDrive,
