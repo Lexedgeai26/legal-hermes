@@ -114,6 +114,21 @@ ProgressCallback = Callable[[str, str, Optional[float]], None]
 meaningfully measurable for that stage (e.g. "starting")."""
 
 
+#: A callable returning True once the user has asked to stop. Checked between
+#: stages and inside the download and model-pull loops — the only places that
+#: run long enough for a cancel to be waiting.
+CancelCheck = Callable[[], bool]
+
+
+def _never_cancelled() -> bool:
+    return False
+
+
+def _check_cancelled(should_cancel: CancelCheck) -> None:
+    if should_cancel():
+        raise ProvisionCancelled("Private AI setup was cancelled")
+
+
 def _noop_progress(stage: str, detail: str, percent: Optional[float]) -> None:
     return None
 
@@ -131,6 +146,16 @@ class ProvisionError(RuntimeError):
     (the API route) is expected to catch this and surface ``str(err)`` as
     the user-facing message; every raise site below already produces a
     message safe to show as-is (no paths beyond $HERMES_HOME, no secrets).
+    """
+
+
+
+class ProvisionCancelled(ProvisionError):
+    """Raised when the user asks to stop. Distinct from a failure.
+
+    Provisioning is a multi-gigabyte download; a user who changes their mind
+    must be able to stop it, and the result is not an error to be reported as
+    one. The caller tells these apart to show "cancelled" rather than "failed".
     """
 
 
@@ -179,6 +204,7 @@ def _download_verified(
     expected_size: int,
     dest_dir: Path,
     on_progress: ProgressCallback,
+    should_cancel: CancelCheck = _never_cancelled,
 ) -> Path:
     import httpx
 
@@ -194,10 +220,20 @@ def _download_verified(
                     raise ProvisionError(f"Download failed: HTTP {resp.status_code} from {url}")
                 with part_path.open("wb") as f:
                     for chunk in resp.iter_bytes(chunk_size=1024 * 256):
+                        # Checked per chunk: this loop is most of the install,
+                        # so a cancel waiting anywhere else would appear to do
+                        # nothing for several minutes.
+                        if should_cancel():
+                            f.close()
+                            part_path.unlink(missing_ok=True)
+                            raise ProvisionCancelled("Private AI setup was cancelled")
                         f.write(chunk)
                         written += len(chunk)
                         pct = (written / expected_size * 100.0) if expected_size else None
                         on_progress("download-runtime", f"{written} of {expected_size} bytes", pct)
+    except ProvisionCancelled:
+        # Already cleaned up; must not be reported as a download failure.
+        raise
     except httpx.HTTPError as exc:
         part_path.unlink(missing_ok=True)
         raise ProvisionError(f"Download failed: {exc}") from exc
@@ -530,7 +566,11 @@ atexit.register(stop_managed_runtime)
 # ─── Model pulls ─────────────────────────────────────────────────────────
 
 
-def pull_default_models(base_url: str, on_progress: ProgressCallback) -> None:
+def pull_default_models(
+    base_url: str,
+    on_progress: ProgressCallback,
+    should_cancel: CancelCheck = _never_cancelled,
+) -> None:
     """Pull the two default legal-compact models via Ollama's own
     ``/api/pull``. Ollama already verifies each blob's digest against its
     registry manifest as it streams — proven working in this session's
@@ -543,12 +583,16 @@ def pull_default_models(base_url: str, on_progress: ProgressCallback) -> None:
         ("install-embedding-model", DEFAULT_EMBEDDING_MODEL),
     ]
     for stage, model in models:
+        _check_cancelled(should_cancel)
         on_progress(stage, f"Pulling {model}", None)
         with httpx.Client(timeout=httpx.Timeout(30.0, read=None)) as client:
             with client.stream("POST", f"{base_url}/api/pull", json={"model": model}) as resp:
                 if resp.status_code != 200:
                     raise ProvisionError(f"Failed to pull {model}: HTTP {resp.status_code}")
                 for line in resp.iter_lines():
+                    # The generation model is ~4.9 GB, so this stream is the
+                    # second place a cancel would otherwise sit unnoticed.
+                    _check_cancelled(should_cancel)
                     if not line:
                         continue
                     try:
@@ -624,7 +668,77 @@ def write_runtime_json(info: RuntimeInfo, *, validated: bool) -> None:
 # ─── Orchestration ────────────────────────────────────────────────────────
 
 
-def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> RuntimeInfo:
+#: What the default profile actually needs to be usable, not merely to install.
+#: 8 GB passes a naive check and then swaps under load — after the operating
+#: system takes its share there is not enough left for a 4.9 GB model plus its
+#: working set, and the result is an agent too slow to use. These mirror the
+#: catalogue's recommendedRamGb for the shipped profile.
+MINIMUM_RAM_GB = 16.0
+MINIMUM_FREE_DISK_GB = 12.0
+
+
+def check_system_capability() -> dict:
+    """Report whether this machine can run the default Private AI profile.
+
+    Returns a dict rather than raising: the caller offers the cloud route
+    instead, which is a complete product and not a degraded one, so an
+    incapable machine is a routing decision rather than an error.
+    """
+    from hermes_constants import get_hermes_home
+
+    reasons: list[str] = []
+    total_ram_gb: Optional[float] = None
+    free_disk_gb: Optional[float] = None
+
+    try:
+        import psutil  # type: ignore
+
+        total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        # Without a reading we do not block: refusing on a machine we simply
+        # could not measure would be worse than letting the install try.
+        _log_debug("private-ai capability: memory could not be measured")
+
+    try:
+        usage = shutil.disk_usage(get_hermes_home())
+        free_disk_gb = usage.free / (1024 ** 3)
+    except Exception:
+        _log_debug("private-ai capability: free disk could not be measured")
+
+    if total_ram_gb is not None and total_ram_gb < MINIMUM_RAM_GB:
+        reasons.append(
+            f"This computer has {total_ram_gb:.0f} GB of memory. "
+            f"Private AI needs at least {MINIMUM_RAM_GB:.0f} GB to run a legal model usably."
+        )
+    if free_disk_gb is not None and free_disk_gb < MINIMUM_FREE_DISK_GB:
+        reasons.append(
+            f"There is {free_disk_gb:.0f} GB of free disk space. "
+            f"Private AI needs about {MINIMUM_FREE_DISK_GB:.0f} GB for the runtime and models."
+        )
+
+    return {
+        "capable": not reasons,
+        "reasons": reasons,
+        "totalRamGb": round(total_ram_gb, 1) if total_ram_gb is not None else None,
+        "freeDiskGb": round(free_disk_gb, 1) if free_disk_gb is not None else None,
+        "minimumRamGb": MINIMUM_RAM_GB,
+        "minimumFreeDiskGb": MINIMUM_FREE_DISK_GB,
+    }
+
+
+def _log_debug(message: str) -> None:
+    try:
+        import logging
+
+        logging.getLogger(__name__).debug(message)
+    except Exception:
+        pass
+
+
+def provision_ollama_runtime(
+    on_progress: ProgressCallback = _noop_progress,
+    should_cancel: CancelCheck = _never_cancelled,
+) -> RuntimeInfo:
     """Full install: download, verify, extract, start, pull defaults.
 
     Only ever call this for the ``not_setup`` detection state — see the
@@ -643,11 +757,18 @@ def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> 
 
     url, expected_sha256, expected_size = _resolve_component()
 
+    _check_cancelled(should_cancel)
     on_progress("resolve", "Checking the approved runtime", None)
     archive_path = _download_verified(
-        url, expected_sha256, expected_size, home / "private-ai" / "downloads", on_progress
+        url,
+        expected_sha256,
+        expected_size,
+        home / "private-ai" / "downloads",
+        on_progress,
+        should_cancel,
     )
 
+    _check_cancelled(should_cancel)
     on_progress("install-runtime", "Extracting runtime", None)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     if archive_path.suffix == ".zip":
@@ -659,12 +780,13 @@ def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> 
     if not executable_path.exists():
         raise ProvisionError("The runtime archive contains no ollama executable.")
 
+    _check_cancelled(should_cancel)
     on_progress("start-runtime", "Starting the runtime", None)
     models_dir = home / "private-ai" / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     info = start_managed_runtime(executable_path, models_dir)
 
-    pull_default_models(info.base_url, on_progress)
+    pull_default_models(info.base_url, on_progress, should_cancel)
 
     on_progress("validate", "Verifying the models", None)
     write_runtime_json(info, validated=True)
@@ -673,7 +795,10 @@ def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> 
     return info
 
 
-def start_existing_runtime(on_progress: ProgressCallback = _noop_progress) -> RuntimeInfo:
+def start_existing_runtime(
+    on_progress: ProgressCallback = _noop_progress,
+    should_cancel: CancelCheck = _never_cancelled,
+) -> RuntimeInfo:
     """Start an already-installed runtime back up. Never downloads
     anything — only valid for the ``unreachable_configured`` detection
     state, where ``runtime.json`` already points at a real, previously

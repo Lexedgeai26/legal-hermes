@@ -961,6 +961,10 @@ export interface PrivateAIJobStarted {
 }
 
 export interface PrivateAIProvisionStatus {
+  /** True from the moment Cancel is pressed until the job actually stops. */
+  cancelRequested?: boolean
+  /** True when the job stopped because the user asked, not because it failed. */
+  cancelled?: boolean
   active: boolean
   stage: string
   detail: string
@@ -982,6 +986,34 @@ export function startPrivateAI(): Promise<PrivateAIJobStarted> {
     ...profileScoped(),
     path: '/api/private-ai/start',
     method: 'POST'
+  })
+}
+
+export interface PrivateAICapability {
+  capable: boolean
+  reasons: string[]
+  totalRamGb: number | null
+  freeDiskGb: number | null
+  minimumRamGb: number
+  minimumFreeDiskGb: number
+}
+
+/// Whether this machine can run a local model, checked before Private AI is
+/// offered. An incapable machine is routed to a cloud provider rather than
+/// allowed to download several gigabytes and fail afterwards.
+export function getPrivateAICapability(): Promise<PrivateAICapability> {
+  return window.hermesDesktop.api<PrivateAICapability>({
+    path: '/api/private-ai/capability'
+  })
+}
+
+/// Ask an in-flight Private AI job to stop. Returns as soon as the request is
+/// recorded; the job stops at its next safe point, which during a multi-GB
+/// download is the end of the current chunk.
+export function cancelPrivateAIProvision(): Promise<{ cancelling: boolean; message?: string }> {
+  return window.hermesDesktop.api<{ cancelling: boolean; message?: string }>({
+    method: 'POST',
+    path: '/api/private-ai/provision/cancel'
   })
 }
 

@@ -69,6 +69,33 @@ pub struct BootstrapHandle {
     pub status: BootstrapStatus,
 }
 
+/// What, if anything, is already installed at the default location.
+///
+/// A second install over the top of an existing one silently replaces a
+/// working setup, including its configuration and matter metadata. The user is
+/// warned and offered a separate folder instead, so both can coexist.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExistingInstall {
+    pub found: bool,
+    /// The Hermes home that would be used if the user continues unchanged.
+    pub hermes_home: String,
+    /// The install root inside it, present only when an install was found.
+    pub install_root: Option<String>,
+}
+
+#[tauri::command]
+pub async fn detect_existing_install() -> Result<ExistingInstall, String> {
+    let home = crate::paths::hermes_home();
+    let install_root = home.join("hermes-agent");
+    let found = hermes_is_installed(&install_root);
+    Ok(ExistingInstall {
+        found,
+        hermes_home: home.to_string_lossy().to_string(),
+        install_root: found.then(|| install_root.to_string_lossy().to_string()),
+    })
+}
+
 #[tauri::command]
 pub async fn start_bootstrap(
     app: AppHandle,
