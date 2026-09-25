@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import platform
 import socket
 import subprocess
@@ -229,13 +230,28 @@ def _safe_member_path(dest_root: Path, member_name: str) -> Path:
 
 
 def _extract_zip(archive_path: Path, dest_root: Path) -> None:
+    """Extract a zip runtime archive, materialising links as copies.
+
+    Same policy as the tar path: a link is written as a copy of the regular
+    file it names inside the archive, and anything pointing outside is refused.
+    The Windows Ollama zips have not needed this so far, but the two extractors
+    should not disagree about what is safe.
+    """
     with zipfile.ZipFile(archive_path) as zf:
+        links: "dict[str, str]" = {}
         for info in zf.infolist():
+            rel = info.filename.replace("\\", "/").strip("/")
             # High 16 bits of external_attr carry the Unix mode when the
             # archive was made on a POSIX system; 0o120000 = S_IFLNK.
             is_symlink = ((info.external_attr >> 16) & 0o170000) == 0o120000
             if is_symlink:
-                raise ProvisionError("Refusing to extract a symlink from the runtime archive.")
+                # A symlink in a zip stores its target as the file body.
+                with zf.open(info) as src:
+                    target_name = src.read().decode("utf-8", "replace").strip()
+                if not target_name:
+                    raise ProvisionError(f"Link {info.filename} in the runtime archive has no target")
+                links[rel] = _resolve_link(rel, target_name)
+                continue
             target = _safe_member_path(dest_root, info.filename)
             if info.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -244,19 +260,85 @@ def _extract_zip(archive_path: Path, dest_root: Path) -> None:
             with zf.open(info) as src, target.open("wb") as dst:
                 dst.write(src.read())
 
+        for link_rel, first_target in links.items():
+            resolved = first_target
+            depth = 0
+            while resolved in links:
+                depth += 1
+                if depth > MAX_LINK_DEPTH:
+                    raise ProvisionError(f"Link {link_rel} in the runtime archive is too deeply chained")
+                resolved = links[resolved]
+            source = _safe_member_path(dest_root, resolved)
+            if not source.is_file():
+                raise ProvisionError(
+                    f"Link {link_rel} names {resolved}, which the runtime archive did not provide"
+                )
+            dest = _safe_member_path(dest_root, link_rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, dest)
+
+
+MAX_LINK_DEPTH = 8
+
+
+def _resolve_link(link_rel: str, target: str) -> str:
+    """Resolve an archive link's target relative to the link's own directory.
+
+    Returns an archive-relative path, or raises if it would escape the archive.
+    """
+    normalized = target.replace("\\", "/")
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        raise ProvisionError(f"Refusing an absolute link target in the runtime archive: {target}")
+    base = [p for p in link_rel.replace("\\", "/").split("/")[:-1] if p not in ("", ".")]
+    for part in normalized.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not base:
+                raise ProvisionError(
+                    f"Refusing a link pointing outside the runtime archive: {link_rel} -> {target}"
+                )
+            base.pop()
+        else:
+            base.append(part)
+    return "/".join(base)
+
 
 def _extract_tar_gz(archive_path: Path, dest_root: Path) -> None:
+    """Extract the runtime archive, materialising links as copies.
+
+    The macOS Ollama tarball ships dylib version chains — libggml.dylib ->
+    libggml.0.dylib -> libggml.0.22.0.dylib — that the runtime must be able to
+    resolve. Refusing every symlink outright therefore made Private AI
+    impossible to install on macOS, which is what it did.
+
+    Rather than create link primitives, each link is resolved through the
+    archive and written as a plain copy of the regular file it ultimately
+    names. That keeps the protection that matters — nothing can point outside
+    the destination, and no link can be made to a path we did not extract —
+    while letting a legitimate archive install. This mirrors the policy the
+    Tauri installer's extractor already implements.
+    """
     import tarfile
 
     with tarfile.open(archive_path, mode="r:gz") as tf:
-        for member in tf.getmembers():
+        members = tf.getmembers()
+        # Deferred: a link may name a file that appears later in the archive.
+        links: "dict[str, str]" = {}
+
+        for member in members:
+            rel = member.name.replace("\\", "/").strip("/")
             if member.issym() or member.islnk():
-                raise ProvisionError("Refusing to extract a symlink from the runtime archive.")
+                if not member.linkname:
+                    raise ProvisionError(f"Link {member.name} in the runtime archive has no target")
+                links[rel] = _resolve_link(rel, member.linkname)
+                continue
             target = _safe_member_path(dest_root, member.name)
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             if not member.isfile():
+                # Device, fifo and other special entries are never installed.
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             src = tf.extractfile(member)
@@ -266,6 +348,28 @@ def _extract_tar_gz(archive_path: Path, dest_root: Path) -> None:
                 dst.write(src.read())
             if os.name != "nt":
                 os.chmod(target, member.mode | 0o100)
+
+        for link_rel, first_target in links.items():
+            resolved = first_target
+            depth = 0
+            while resolved in links:
+                depth += 1
+                if depth > MAX_LINK_DEPTH:
+                    raise ProvisionError(f"Link {link_rel} in the runtime archive is too deeply chained")
+                resolved = links[resolved]
+
+            source = _safe_member_path(dest_root, resolved)
+            # Only a regular file we extracted ourselves may be copied: this is
+            # what stops a link naming something outside the destination.
+            if not source.is_file():
+                raise ProvisionError(
+                    f"Link {link_rel} names {resolved}, which the runtime archive did not provide"
+                )
+            dest = _safe_member_path(dest_root, link_rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, dest)
+            if os.name != "nt":
+                os.chmod(dest, os.stat(source).st_mode | 0o100)
 
 
 def _runtime_dir() -> Path:
