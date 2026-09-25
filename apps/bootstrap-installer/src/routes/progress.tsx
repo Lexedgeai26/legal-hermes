@@ -3,6 +3,7 @@ import { useStore } from '@nanostores/react'
 import { Button } from '../components/button'
 import {
   cancelInstall,
+  $installCancelling,
   $progress,
   type BootstrapStateModel,
   type StageState
@@ -22,6 +23,7 @@ interface ProgressProps {
  */
 export default function ProgressScreen({ bootstrap }: ProgressProps) {
   const progress = useStore($progress)
+  const cancelling = useStore($installCancelling)
   const [showLogs, setShowLogs] = useState(false)
   const logEndRef = useRef<HTMLDivElement>(null)
 
@@ -157,13 +159,27 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
         </button>
 
         {bootstrap.status === 'running' && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void cancelInstall()}
-          >
-            Cancel
-          </Button>
+          /* A stage already in flight — a dependency install, a desktop build —
+             cannot stop mid-step, so the request is shown immediately. Without
+             this the screen was identical after the click and the button read
+             as broken, which is exactly how it was reported. */
+          <div className="flex items-center gap-2.5">
+            {cancelling && (
+              <span className="text-xs text-muted-foreground">
+                Stopping after the current step
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={cancelling}
+              onClick={() => void cancelInstall()}
+              className="inline-flex items-center gap-1.5"
+            >
+              {cancelling && <Loader2 size={13} className="animate-spin" />}
+              {cancelling ? 'Cancelling\u2026' : 'Cancel'}
+            </Button>
+          </div>
         )}
       </div>
     </div>
