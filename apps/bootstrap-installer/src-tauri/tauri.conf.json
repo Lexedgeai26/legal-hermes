@@ -33,6 +33,7 @@
   },
   "bundle": {
     "active": true,
+    "useLocalToolsDir": true,
     "category": "DeveloperTool",
     "shortDescription": "LexEdge Hermes Agent Setup",
     "longDescription": "Installs LexEdge Hermes Agent on your machine. Drives scripts/install.ps1 (Windows) and scripts/install.sh (macOS/Linux).",

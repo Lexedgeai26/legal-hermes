@@ -28,13 +28,19 @@ import {
   validateProviderCredential
 } from '@/hermes'
 import type { PrivateAICapability, PrivateAIProvisionStatus } from '@/hermes'
-import { CheckCircle2, KeyRound, Loader2, MessageCircle, Users } from '@/lib/icons'
+import { CheckCircle2, KeyRound, Loader2, MessageCircle, Users, X } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { notifyError } from '@/store/notifications'
 import { ensureGatewayProfile } from '@/store/profile'
 import type { LexEdgePracticeCatalog, ModelOptionProvider, OnboardingStatus, SkillInfo } from '@/types/hermes'
 
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const FORCE_ONBOARDING_KEY = 'lexedge:onboarding:force'
+// Cached client-side so a slow cold-start backend (getOnboardingStatus timing
+// out on the day's first launch — see withBackendWarmup) doesn't get
+// misread as "never onboarded" and send an already-set-up user through the
+// wizard again. Only ever trusted as a fallback when the live check fails.
+const LAST_KNOWN_COMPLETED_KEY = 'lexedge:onboarding:lastKnownCompleted'
 
 const PRACTICE_ROLES = [
   {
@@ -592,6 +598,14 @@ export function LawyerOnboardingWizard({
   const [soul, setSoul] = useState('')
   const [providers, setProviders] = useState<ModelOptionProvider[]>([])
   const [providerSlug, setProviderSlug] = useState('')
+  // The provider actually saved in config.yaml, from the fast/reliable
+  // getOnboardingStatus() call — used as a fallback when the live provider
+  // list's own is_current flag misses. That flag comes from a snapshot of
+  // /api/model/options, which can be taken before a local runtime like
+  // Private AI has finished detecting itself; without this, an
+  // already-configured Private AI setup can silently fall through to
+  // whichever provider happens to have an API key on the machine.
+  const preferredProviderFromStatusRef = useRef<string | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [privateAiJob, setPrivateAiJob] = useState<PrivateAIProvisionStatus | null>(null)
   const [privateAiJobError, setPrivateAiJobError] = useState<string | null>(null)
@@ -606,6 +620,18 @@ export function LawyerOnboardingWizard({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Error banners used to only clear when the user navigated to another
+  // step and back — nothing here ever timed out or could be dismissed.
+  // Auto-clear after a few seconds; a fresh error resets the clock rather
+  // than being cut off by whatever time was left on the previous one.
+  useEffect(() => {
+    if (!error) {
+      return
+    }
+    const timer = setTimeout(() => setError(null), 6000)
+    return () => clearTimeout(timer)
+  }, [error])
 
   const providerRows = useMemo(
     () =>
@@ -647,6 +673,9 @@ export function LawyerOnboardingWizard({
         if (cancelled) {
           return
         }
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(LAST_KNOWN_COMPLETED_KEY, next.completed ? '1' : '0')
+        }
         setStatus(next)
         setVisible(forceOnboarding || !next.completed)
         if (next.completed && !forceOnboarding) {
@@ -658,11 +687,33 @@ export function LawyerOnboardingWizard({
         if (next.profile_name) {
           setProfileName(next.profile_name === 'default' ? 'lexedge-practice' : next.profile_name)
         }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setVisible(true)
+        // practiceRole otherwise stays hardcoded at its useState default
+        // ('litigation-lawyer') every time this mounts, silently discarding
+        // whatever the user actually picked on a prior run even though it's
+        // sitting right here in the profile the backend already saved.
+        const savedPracticeRole = next.profile?.practice_role
+        if (savedPracticeRole && PRACTICE_ROLES.some(role => role.value === savedPracticeRole)) {
+          setPracticeRole(savedPracticeRole)
         }
+        preferredProviderFromStatusRef.current = next.profile?.provider ?? null
+      })
+      .catch(err => {
+        if (cancelled) {
+          return
+        }
+        // A slow cold-start backend (see withBackendWarmup) rejects here on
+        // the day's first launch. Previously this always showed the wizard,
+        // which wrongly sent already-onboarded users through setup again —
+        // trust the last confirmed status instead of assuming "never
+        // onboarded" just because this one check couldn't complete in time.
+        const lastKnownCompleted =
+          typeof window !== 'undefined' && window.localStorage.getItem(LAST_KNOWN_COMPLETED_KEY) === '1'
+        if (lastKnownCompleted && !forceOnboarding) {
+          setVisible(false)
+          notifyError(err, 'Could not reach LexEdge to check setup status.')
+          return
+        }
+        setVisible(true)
       })
 
     getGlobalModelOptions({ refresh: true })
@@ -681,8 +732,15 @@ export function LawyerOnboardingWizard({
             // stopped) — otherwise reopening this step after a restart
             // silently jumps to an unrelated provider instead of the one
             // the user actually configured.
+            // is_current comes from this same live snapshot, which can be
+            // taken before a local runtime (Private AI) has finished
+            // detecting itself — so also fall back to the provider the
+            // fast/reliable onboarding-status call already told us was
+            // configured, before giving up and picking whatever merely has
+            // an API key sitting in the environment.
             const preferred =
               sorted.find(provider => provider.is_current) ??
+              sorted.find(provider => provider.slug === preferredProviderFromStatusRef.current) ??
               sorted.find(provider => provider.authenticated || Boolean(providerKeyEnv(provider))) ??
               sorted[0]
             return preferred?.slug ?? ''
@@ -980,6 +1038,11 @@ export function LawyerOnboardingWizard({
       }
 
       const refreshed = await getGlobalModelOptions({ refresh: true })
+      // Mirror runPrivateAiJob above: without this, the freshly-authenticated
+      // provider never lands in the state the status tags read from, so
+      // clicking Back after a successful cloud-provider connection shows it
+      // as not connected again even though it saved and tested fine.
+      setProviders(refreshed.providers ?? [])
       const provider =
         refreshed.providers?.find(item => item.slug === selectedProvider.slug) ??
         selectedProvider
@@ -1211,7 +1274,7 @@ export function LawyerOnboardingWizard({
         <div className="flex-1 overflow-auto px-6 py-8 lg:px-10">
           {(error || message) && (
             <div className="sticky top-0 z-20 mx-auto max-w-5xl pb-4">
-              <StatusAlert error={error} message={message} />
+              <StatusAlert error={error} message={message} onDismissError={() => setError(null)} />
             </div>
           )}
 
@@ -2138,12 +2201,6 @@ export function LawyerOnboardingWizard({
                 </div>
               </section>
             )}
-
-            {(error || message) && (
-              <div className="mt-8">
-                <StatusAlert error={error} message={message} />
-              </div>
-            )}
           </div>
         </div>
 
@@ -2221,17 +2278,35 @@ function PrivacySafetyNote() {
   )
 }
 
-function StatusAlert({ error, message }: { error: string | null; message: string | null }) {
+function StatusAlert({
+  error,
+  message,
+  onDismissError
+}: {
+  error: string | null
+  message: string | null
+  onDismissError?: () => void
+}) {
   return (
     <div
       className={cn(
-        'rounded-[6px] border px-4 py-3 text-sm shadow-sm',
+        'flex items-start gap-3 rounded-[6px] border px-4 py-3 text-sm shadow-sm',
         error
           ? 'border-red-300 bg-red-50 text-red-700'
           : 'border-(--ui-stroke-secondary) bg-white text-(--ui-text-secondary)'
       )}
     >
-      {error ?? message}
+      <div className="flex-1">{error ?? message}</div>
+      {error && onDismissError && (
+        <button
+          aria-label="Dismiss error"
+          className="shrink-0 rounded p-0.5 text-red-700/70 hover:bg-red-100 hover:text-red-700"
+          onClick={onDismissError}
+          type="button"
+        >
+          <X className="size-4" />
+        </button>
+      )}
     </div>
   )
 }

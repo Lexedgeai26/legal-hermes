@@ -645,6 +645,14 @@ async fn run_bootstrap(
         )
         .await?;
 
+        // This is the "return" half of the comment above: run_script only
+        // borrows the receiver to listen for a cancel signal, it never
+        // consumes it, so hand it back to the holder for the next stage's
+        // take() to find. Without this, cancellation silently stopped
+        // working after the very first stage — every later Cancel click
+        // had no receiver left to signal.
+        *cancel_rx_holder.lock().await = stage_result.cancel_rx;
+
         let duration_ms = started.elapsed().as_millis() as u64;
 
         if stage_result.killed {

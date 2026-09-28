@@ -27,6 +27,11 @@ pub struct ScriptResult {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub killed: bool,
+    /// Handed back so the caller can re-arm cancellation for the next stage.
+    /// `run_script` only borrows this to listen for a cancel signal — it
+    /// never consumes it — so unless the run was itself killed, it's still
+    /// good to reuse.
+    pub cancel_rx: Option<CancelRx>,
 }
 
 /// Cancellation signal — `cancel_tx.send(()).await` aborts the running script.
@@ -151,6 +156,7 @@ pub async fn run_script(
         stderr: combined_stderr,
         exit_code: status.code(),
         killed,
+        cancel_rx,
     })
 }
 
