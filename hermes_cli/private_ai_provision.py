@@ -705,7 +705,14 @@ def check_system_capability() -> dict:
     except Exception:
         _log_debug("private-ai capability: free disk could not be measured")
 
-    if total_ram_gb is not None and total_ram_gb < MINIMUM_RAM_GB:
+    # Compare the value we actually show the user, not the raw byte count.
+    # A machine sold and labelled "16 GB" almost never reports exactly 16.0
+    # here -- the motherboard/integrated GPU/BIOS reserve a slice, so
+    # psutil typically reads ~15.8-15.9 GB. A strict `< MINIMUM_RAM_GB`
+    # against that raw figure rejected essentially every real 16 GB
+    # machine, while the rounded display line told the user "This computer
+    # has 16 GB... needs at least 16 GB" -- a self-contradictory message.
+    if total_ram_gb is not None and round(total_ram_gb) < MINIMUM_RAM_GB:
         reasons.append(
             f"This computer has {total_ram_gb:.0f} GB of memory. "
             f"Private AI needs at least {MINIMUM_RAM_GB:.0f} GB to run a legal model usably."
