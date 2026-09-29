@@ -50,11 +50,15 @@ confused in bug reports.
 
 ## Private AI model policy
 
-Models come from a **signed catalogue** that has passed legal benchmark review.
+Models come from a **signed catalogue** — a fixed set LexEdge controls. Note
+the wording: the catalogue carries a `legalBenchmark` score, but no independent
+legal benchmark has been run yet, so product copy must not claim one. Tighten
+the claim only when there is a result to point at.
 Two rules follow, and neither is a formality:
 
 - A technically capable model that is not in the catalogue must never be
-  offered. The product tells users their models are legally reviewed.
+  offered. The product tells users their models come from a catalogue LexEdge
+  controls and tests.
 - Identity is the **digest**, not the tag. Tags are mutable, so `x:latest` and
   `x:8b` may be the same blob today and different tomorrow.
 

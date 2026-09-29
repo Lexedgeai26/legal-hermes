@@ -258,6 +258,22 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def seed_catalog(conn: sqlite3.Connection) -> None:
+    # One-time cleanup for a bogus row fixed in JURISDICTIONS on 2026-09-22
+    # (commit d36f26992): "India" used as a state placeholder for the Supreme
+    # Court entry, which the State/Province picker then offered as a real
+    # state (02-LOW-014). INSERT OR IGNORE below only adds rows that are
+    # missing — it never removes or updates ones already seeded by an older
+    # app version, so any database seeded before that fix keeps this exact
+    # row forever, sitting alongside the corrected one, no matter how many
+    # times the app is updated. Delete it explicitly so existing databases
+    # self-heal on next launch instead of only new installs getting it right.
+    conn.execute(
+        """
+        DELETE FROM jurisdiction_catalog
+        WHERE legal_system = 'Common Law' AND country = 'India' AND state = 'India'
+          AND region = 'New Delhi' AND court_type = 'Supreme Court' AND court = 'Supreme Court of India'
+        """
+    )
     for category, labels in OPTION_CATEGORIES.items():
         for index, label in enumerate(labels):
             conn.execute(

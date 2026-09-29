@@ -161,6 +161,14 @@ pub struct ModelRecommendation {
     pub runtime: Option<String>,
     pub estimated_tokens_per_second: Option<f64>,
     pub estimated_memory_gb: Option<f64>,
+    /// What the catalogue says this model needs, as opposed to what a fit
+    /// report measured. llmfit is not wired in, so the estimates above are
+    /// always absent in production and the card showed "Memory varies" /
+    /// "Speed unknown" on every machine. These are facts we do have, and a
+    /// requirement is more useful to a buyer than an absent estimate.
+    pub minimum_ram_gb: f64,
+    pub recommended_ram_gb: f64,
+    pub target_tokens_per_second: f64,
     pub download_size_gb: f64,
     pub operational_context_tokens: u64,
     pub final_score: f64,
@@ -689,6 +697,9 @@ fn score_profile(
         runtime: fit.and_then(|value| value.runtime.clone()),
         estimated_tokens_per_second: estimated_tps,
         estimated_memory_gb: fit.and_then(|value| value.memory_required_gb),
+        minimum_ram_gb: profile.minimum_ram_gb,
+        recommended_ram_gb: profile.recommended_ram_gb,
+        target_tokens_per_second: profile.target_tps,
         download_size_gb: profile.download_size_gb,
         operational_context_tokens: profile.operational_context_tokens,
         final_score: (final_score * 10.0).round() / 10.0,

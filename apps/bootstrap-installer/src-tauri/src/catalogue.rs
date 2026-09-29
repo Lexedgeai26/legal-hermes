@@ -218,6 +218,43 @@ mod prod_catalogue_tests {
         );
     }
 
+    /// The component manifest ships beside the catalogue and is verified with
+    /// the same key. It was missed when the catalogue was first wired, so
+    /// analysis succeeded while provisioning failed mid-install with "No signed
+    /// catalogue or component manifest has been provisioned for this build" —
+    /// the user reached the download stage before anything told them it could
+    /// not work. Both artifacts are asserted here so neither can ship alone.
+    #[test]
+    fn shipped_component_manifest_verifies_against_the_pinned_key() {
+        const ENVELOPE: &str = include_str!("../catalogue/production-components.signed.json");
+        let envelope: SignedEnvelope =
+            serde_json::from_str(ENVELOPE).expect("bundled component manifest must parse");
+        assert_eq!(envelope.key_id, PROD_KEY_ID);
+
+        let manifest = crate::component_manifest::load_signed_component_manifest(
+            &envelope,
+            "2026-09-25T00:00:00Z",
+        )
+        .expect("bundled component manifest must verify against the pinned key");
+
+        // Every platform the installer can provision on needs an artifact, or
+        // setup fails only on the machines nobody tested.
+        use crate::component_manifest::{Architecture, Platform};
+        for (platform, arch) in [
+            (Platform::Macos, Architecture::Arm64),
+            (Platform::Macos, Architecture::X64),
+            (Platform::Windows, Architecture::X64),
+        ] {
+            assert!(
+                manifest
+                    .components
+                    .iter()
+                    .any(|c| c.platform == platform && c.architecture == arch),
+                "no component for {platform:?}/{arch:?}"
+            );
+        }
+    }
+
     /// Expiry is the only thing that bounds how long a withdrawn catalogue
     /// stays usable, so a shipped one must not already be expired — and must
     /// not be so far out that the control is inert.

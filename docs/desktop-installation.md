@@ -161,7 +161,7 @@ Nothing is hidden. If a model is excluded, the reason is stated so the decision
 is reviewable rather than mysterious.
 
 A model is only offered if it comes from the **signed LexEdge catalogue** of
-legally reviewed models *and* meets two separate technical requirements: a
+models LexEdge has selected and tested *and* meets two separate technical requirements: a
 context window large enough for real legal documents, and support for the tool
 calls that every chat turn uses. Both are checked independently, because a model
 can satisfy one and fail the other.

@@ -192,6 +192,7 @@ pub fn run() {
             // Mode (install vs update)
             get_mode,
             // Bootstrap lifecycle
+            bootstrap::detect_existing_install,
             bootstrap::start_bootstrap,
             bootstrap::cancel_bootstrap,
             bootstrap::get_bootstrap_status,

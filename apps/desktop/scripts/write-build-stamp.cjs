@@ -77,9 +77,39 @@ function fromLocalGit() {
   }
 }
 
+/// A repository the installer created from a ZIP archive.
+///
+/// When both git clones fail — a host-key rejection and a reset connection on
+/// the machine that produced this — install.ps1 falls back to a ZIP and then
+/// runs `git init` so later updates work. That repo has a remote and a branch
+/// but no commits, so `git rev-parse HEAD` fails and the desktop build aborted,
+/// taking the whole install with it.
+///
+/// The branch is still knowable, and it is what first-launch bootstrap
+/// actually pins against, so the stamp records it and marks the commit as
+/// unknown rather than failing. A ZIP install is explicitly flagged so nothing
+/// downstream mistakes this for a verified checkout.
+function fromZipInstall() {
+  const branch =
+    tryExec("git rev-parse --abbrev-ref HEAD", { cwd: REPO_ROOT }) ||
+    tryExec("git symbolic-ref --short HEAD", { cwd: REPO_ROOT })
+  const remote = tryExec("git config --get remote.origin.url", { cwd: REPO_ROOT })
+  // Only accept this path for a real repository that simply has no commits.
+  // Somewhere that is not a git repo at all should still fail loudly.
+  if (!remote || !branch) return null
+  return {
+    commit: null,
+    branch: branch === "HEAD" ? null : branch,
+    dirty: false,
+    source: "zip-install"
+  }
+}
+
 function main() {
-  const stamp = fromCI() || fromLocalGit()
-  if (!stamp || !stamp.commit) {
+  const stamp = fromCI() || fromLocalGit() || fromZipInstall()
+  // A ZIP install has no commit but does have a branch, which is enough to
+  // pin first-launch bootstrap. Only a complete absence of both is fatal.
+  if (!stamp || (!stamp.commit && !stamp.branch)) {
     console.error(
       "[write-build-stamp] ERROR: could not determine git commit.\n" +
         "  - $GITHUB_SHA not set\n" +
@@ -90,6 +120,16 @@ function main() {
         "against. Run from a git checkout or set $GITHUB_SHA explicitly."
     )
     process.exit(1)
+  }
+
+  if (stamp.source === "zip-install") {
+    console.warn(
+      "[write-build-stamp] NOTE: installed from a ZIP archive, so there is no\n" +
+        "  commit to pin. Pinning to branch " +
+        stamp.branch +
+        " instead. This happens when\n" +
+        "  git clone fails and install.ps1 falls back to the archive download."
+    )
   }
 
   if (stamp.dirty) {

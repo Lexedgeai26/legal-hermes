@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import platform
 import socket
 import subprocess
@@ -113,6 +114,21 @@ ProgressCallback = Callable[[str, str, Optional[float]], None]
 meaningfully measurable for that stage (e.g. "starting")."""
 
 
+#: A callable returning True once the user has asked to stop. Checked between
+#: stages and inside the download and model-pull loops — the only places that
+#: run long enough for a cancel to be waiting.
+CancelCheck = Callable[[], bool]
+
+
+def _never_cancelled() -> bool:
+    return False
+
+
+def _check_cancelled(should_cancel: CancelCheck) -> None:
+    if should_cancel():
+        raise ProvisionCancelled("Private AI setup was cancelled")
+
+
 def _noop_progress(stage: str, detail: str, percent: Optional[float]) -> None:
     return None
 
@@ -130,6 +146,16 @@ class ProvisionError(RuntimeError):
     (the API route) is expected to catch this and surface ``str(err)`` as
     the user-facing message; every raise site below already produces a
     message safe to show as-is (no paths beyond $HERMES_HOME, no secrets).
+    """
+
+
+
+class ProvisionCancelled(ProvisionError):
+    """Raised when the user asks to stop. Distinct from a failure.
+
+    Provisioning is a multi-gigabyte download; a user who changes their mind
+    must be able to stop it, and the result is not an error to be reported as
+    one. The caller tells these apart to show "cancelled" rather than "failed".
     """
 
 
@@ -178,6 +204,7 @@ def _download_verified(
     expected_size: int,
     dest_dir: Path,
     on_progress: ProgressCallback,
+    should_cancel: CancelCheck = _never_cancelled,
 ) -> Path:
     import httpx
 
@@ -193,10 +220,20 @@ def _download_verified(
                     raise ProvisionError(f"Download failed: HTTP {resp.status_code} from {url}")
                 with part_path.open("wb") as f:
                     for chunk in resp.iter_bytes(chunk_size=1024 * 256):
+                        # Checked per chunk: this loop is most of the install,
+                        # so a cancel waiting anywhere else would appear to do
+                        # nothing for several minutes.
+                        if should_cancel():
+                            f.close()
+                            part_path.unlink(missing_ok=True)
+                            raise ProvisionCancelled("Private AI setup was cancelled")
                         f.write(chunk)
                         written += len(chunk)
                         pct = (written / expected_size * 100.0) if expected_size else None
                         on_progress("download-runtime", f"{written} of {expected_size} bytes", pct)
+    except ProvisionCancelled:
+        # Already cleaned up; must not be reported as a download failure.
+        raise
     except httpx.HTTPError as exc:
         part_path.unlink(missing_ok=True)
         raise ProvisionError(f"Download failed: {exc}") from exc
@@ -229,13 +266,28 @@ def _safe_member_path(dest_root: Path, member_name: str) -> Path:
 
 
 def _extract_zip(archive_path: Path, dest_root: Path) -> None:
+    """Extract a zip runtime archive, materialising links as copies.
+
+    Same policy as the tar path: a link is written as a copy of the regular
+    file it names inside the archive, and anything pointing outside is refused.
+    The Windows Ollama zips have not needed this so far, but the two extractors
+    should not disagree about what is safe.
+    """
     with zipfile.ZipFile(archive_path) as zf:
+        links: "dict[str, str]" = {}
         for info in zf.infolist():
+            rel = info.filename.replace("\\", "/").strip("/")
             # High 16 bits of external_attr carry the Unix mode when the
             # archive was made on a POSIX system; 0o120000 = S_IFLNK.
             is_symlink = ((info.external_attr >> 16) & 0o170000) == 0o120000
             if is_symlink:
-                raise ProvisionError("Refusing to extract a symlink from the runtime archive.")
+                # A symlink in a zip stores its target as the file body.
+                with zf.open(info) as src:
+                    target_name = src.read().decode("utf-8", "replace").strip()
+                if not target_name:
+                    raise ProvisionError(f"Link {info.filename} in the runtime archive has no target")
+                links[rel] = _resolve_link(rel, target_name)
+                continue
             target = _safe_member_path(dest_root, info.filename)
             if info.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -244,19 +296,85 @@ def _extract_zip(archive_path: Path, dest_root: Path) -> None:
             with zf.open(info) as src, target.open("wb") as dst:
                 dst.write(src.read())
 
+        for link_rel, first_target in links.items():
+            resolved = first_target
+            depth = 0
+            while resolved in links:
+                depth += 1
+                if depth > MAX_LINK_DEPTH:
+                    raise ProvisionError(f"Link {link_rel} in the runtime archive is too deeply chained")
+                resolved = links[resolved]
+            source = _safe_member_path(dest_root, resolved)
+            if not source.is_file():
+                raise ProvisionError(
+                    f"Link {link_rel} names {resolved}, which the runtime archive did not provide"
+                )
+            dest = _safe_member_path(dest_root, link_rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, dest)
+
+
+MAX_LINK_DEPTH = 8
+
+
+def _resolve_link(link_rel: str, target: str) -> str:
+    """Resolve an archive link's target relative to the link's own directory.
+
+    Returns an archive-relative path, or raises if it would escape the archive.
+    """
+    normalized = target.replace("\\", "/")
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        raise ProvisionError(f"Refusing an absolute link target in the runtime archive: {target}")
+    base = [p for p in link_rel.replace("\\", "/").split("/")[:-1] if p not in ("", ".")]
+    for part in normalized.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not base:
+                raise ProvisionError(
+                    f"Refusing a link pointing outside the runtime archive: {link_rel} -> {target}"
+                )
+            base.pop()
+        else:
+            base.append(part)
+    return "/".join(base)
+
 
 def _extract_tar_gz(archive_path: Path, dest_root: Path) -> None:
+    """Extract the runtime archive, materialising links as copies.
+
+    The macOS Ollama tarball ships dylib version chains — libggml.dylib ->
+    libggml.0.dylib -> libggml.0.22.0.dylib — that the runtime must be able to
+    resolve. Refusing every symlink outright therefore made Private AI
+    impossible to install on macOS, which is what it did.
+
+    Rather than create link primitives, each link is resolved through the
+    archive and written as a plain copy of the regular file it ultimately
+    names. That keeps the protection that matters — nothing can point outside
+    the destination, and no link can be made to a path we did not extract —
+    while letting a legitimate archive install. This mirrors the policy the
+    Tauri installer's extractor already implements.
+    """
     import tarfile
 
     with tarfile.open(archive_path, mode="r:gz") as tf:
-        for member in tf.getmembers():
+        members = tf.getmembers()
+        # Deferred: a link may name a file that appears later in the archive.
+        links: "dict[str, str]" = {}
+
+        for member in members:
+            rel = member.name.replace("\\", "/").strip("/")
             if member.issym() or member.islnk():
-                raise ProvisionError("Refusing to extract a symlink from the runtime archive.")
+                if not member.linkname:
+                    raise ProvisionError(f"Link {member.name} in the runtime archive has no target")
+                links[rel] = _resolve_link(rel, member.linkname)
+                continue
             target = _safe_member_path(dest_root, member.name)
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             if not member.isfile():
+                # Device, fifo and other special entries are never installed.
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             src = tf.extractfile(member)
@@ -266,6 +384,28 @@ def _extract_tar_gz(archive_path: Path, dest_root: Path) -> None:
                 dst.write(src.read())
             if os.name != "nt":
                 os.chmod(target, member.mode | 0o100)
+
+        for link_rel, first_target in links.items():
+            resolved = first_target
+            depth = 0
+            while resolved in links:
+                depth += 1
+                if depth > MAX_LINK_DEPTH:
+                    raise ProvisionError(f"Link {link_rel} in the runtime archive is too deeply chained")
+                resolved = links[resolved]
+
+            source = _safe_member_path(dest_root, resolved)
+            # Only a regular file we extracted ourselves may be copied: this is
+            # what stops a link naming something outside the destination.
+            if not source.is_file():
+                raise ProvisionError(
+                    f"Link {link_rel} names {resolved}, which the runtime archive did not provide"
+                )
+            dest = _safe_member_path(dest_root, link_rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, dest)
+            if os.name != "nt":
+                os.chmod(dest, os.stat(source).st_mode | 0o100)
 
 
 def _runtime_dir() -> Path:
@@ -426,7 +566,11 @@ atexit.register(stop_managed_runtime)
 # ─── Model pulls ─────────────────────────────────────────────────────────
 
 
-def pull_default_models(base_url: str, on_progress: ProgressCallback) -> None:
+def pull_default_models(
+    base_url: str,
+    on_progress: ProgressCallback,
+    should_cancel: CancelCheck = _never_cancelled,
+) -> None:
     """Pull the two default legal-compact models via Ollama's own
     ``/api/pull``. Ollama already verifies each blob's digest against its
     registry manifest as it streams — proven working in this session's
@@ -439,12 +583,16 @@ def pull_default_models(base_url: str, on_progress: ProgressCallback) -> None:
         ("install-embedding-model", DEFAULT_EMBEDDING_MODEL),
     ]
     for stage, model in models:
+        _check_cancelled(should_cancel)
         on_progress(stage, f"Pulling {model}", None)
         with httpx.Client(timeout=httpx.Timeout(30.0, read=None)) as client:
             with client.stream("POST", f"{base_url}/api/pull", json={"model": model}) as resp:
                 if resp.status_code != 200:
                     raise ProvisionError(f"Failed to pull {model}: HTTP {resp.status_code}")
                 for line in resp.iter_lines():
+                    # The generation model is ~4.9 GB, so this stream is the
+                    # second place a cancel would otherwise sit unnoticed.
+                    _check_cancelled(should_cancel)
                     if not line:
                         continue
                     try:
@@ -520,7 +668,77 @@ def write_runtime_json(info: RuntimeInfo, *, validated: bool) -> None:
 # ─── Orchestration ────────────────────────────────────────────────────────
 
 
-def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> RuntimeInfo:
+#: What the default profile actually needs to be usable, not merely to install.
+#: 8 GB passes a naive check and then swaps under load — after the operating
+#: system takes its share there is not enough left for a 4.9 GB model plus its
+#: working set, and the result is an agent too slow to use. These mirror the
+#: catalogue's recommendedRamGb for the shipped profile.
+MINIMUM_RAM_GB = 16.0
+MINIMUM_FREE_DISK_GB = 12.0
+
+
+def check_system_capability() -> dict:
+    """Report whether this machine can run the default Private AI profile.
+
+    Returns a dict rather than raising: the caller offers the cloud route
+    instead, which is a complete product and not a degraded one, so an
+    incapable machine is a routing decision rather than an error.
+    """
+    from hermes_constants import get_hermes_home
+
+    reasons: list[str] = []
+    total_ram_gb: Optional[float] = None
+    free_disk_gb: Optional[float] = None
+
+    try:
+        import psutil  # type: ignore
+
+        total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        # Without a reading we do not block: refusing on a machine we simply
+        # could not measure would be worse than letting the install try.
+        _log_debug("private-ai capability: memory could not be measured")
+
+    try:
+        usage = shutil.disk_usage(get_hermes_home())
+        free_disk_gb = usage.free / (1024 ** 3)
+    except Exception:
+        _log_debug("private-ai capability: free disk could not be measured")
+
+    if total_ram_gb is not None and total_ram_gb < MINIMUM_RAM_GB:
+        reasons.append(
+            f"This computer has {total_ram_gb:.0f} GB of memory. "
+            f"Private AI needs at least {MINIMUM_RAM_GB:.0f} GB to run a legal model usably."
+        )
+    if free_disk_gb is not None and free_disk_gb < MINIMUM_FREE_DISK_GB:
+        reasons.append(
+            f"There is {free_disk_gb:.0f} GB of free disk space. "
+            f"Private AI needs about {MINIMUM_FREE_DISK_GB:.0f} GB for the runtime and models."
+        )
+
+    return {
+        "capable": not reasons,
+        "reasons": reasons,
+        "totalRamGb": round(total_ram_gb, 1) if total_ram_gb is not None else None,
+        "freeDiskGb": round(free_disk_gb, 1) if free_disk_gb is not None else None,
+        "minimumRamGb": MINIMUM_RAM_GB,
+        "minimumFreeDiskGb": MINIMUM_FREE_DISK_GB,
+    }
+
+
+def _log_debug(message: str) -> None:
+    try:
+        import logging
+
+        logging.getLogger(__name__).debug(message)
+    except Exception:
+        pass
+
+
+def provision_ollama_runtime(
+    on_progress: ProgressCallback = _noop_progress,
+    should_cancel: CancelCheck = _never_cancelled,
+) -> RuntimeInfo:
     """Full install: download, verify, extract, start, pull defaults.
 
     Only ever call this for the ``not_setup`` detection state — see the
@@ -539,11 +757,18 @@ def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> 
 
     url, expected_sha256, expected_size = _resolve_component()
 
+    _check_cancelled(should_cancel)
     on_progress("resolve", "Checking the approved runtime", None)
     archive_path = _download_verified(
-        url, expected_sha256, expected_size, home / "private-ai" / "downloads", on_progress
+        url,
+        expected_sha256,
+        expected_size,
+        home / "private-ai" / "downloads",
+        on_progress,
+        should_cancel,
     )
 
+    _check_cancelled(should_cancel)
     on_progress("install-runtime", "Extracting runtime", None)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     if archive_path.suffix == ".zip":
@@ -555,12 +780,13 @@ def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> 
     if not executable_path.exists():
         raise ProvisionError("The runtime archive contains no ollama executable.")
 
+    _check_cancelled(should_cancel)
     on_progress("start-runtime", "Starting the runtime", None)
     models_dir = home / "private-ai" / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     info = start_managed_runtime(executable_path, models_dir)
 
-    pull_default_models(info.base_url, on_progress)
+    pull_default_models(info.base_url, on_progress, should_cancel)
 
     on_progress("validate", "Verifying the models", None)
     write_runtime_json(info, validated=True)
@@ -569,7 +795,10 @@ def provision_ollama_runtime(on_progress: ProgressCallback = _noop_progress) -> 
     return info
 
 
-def start_existing_runtime(on_progress: ProgressCallback = _noop_progress) -> RuntimeInfo:
+def start_existing_runtime(
+    on_progress: ProgressCallback = _noop_progress,
+    should_cancel: CancelCheck = _never_cancelled,
+) -> RuntimeInfo:
     """Start an already-installed runtime back up. Never downloads
     anything — only valid for the ``unreachable_configured`` detection
     state, where ``runtime.json`` already points at a real, previously

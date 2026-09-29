@@ -41,7 +41,7 @@ universal — the Private AI runtime pins a different Ollama artifact per arch.
 ## 2026-09-15 — Private AI model reuse
 
 **Catalogue membership is not negotiable.** The product tells users their models
-are legally reviewed, so reuse is the intersection of "installed" and "in the
+come from a catalogue LexEdge controls, so reuse is the intersection of "installed" and "in the
 signed catalogue" — never "technically capable".
 
 **Identity is the digest, not the tag.** Observed live: a machine held

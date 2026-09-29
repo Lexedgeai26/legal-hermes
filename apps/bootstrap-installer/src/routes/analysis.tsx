@@ -74,17 +74,25 @@ function ModelCard({
         <div>
           <dt className="sr-only">Memory</dt>
           <dd>
+            {/* Prefer a measured figure; fall back to the catalogue's own
+                requirement rather than "Memory varies", which told the reader
+                nothing and appeared on every machine because no production
+                build produces a fit report. */}
             {model.estimatedMemoryGb
               ? `${model.estimatedMemoryGb.toFixed(1)} GB memory`
-              : 'Memory varies'}
+              : `${model.recommendedRamGb} GB RAM recommended`}
           </dd>
         </div>
         <div>
           <dt className="sr-only">Speed</dt>
           <dd>
+            {/* Only a measured rate is shown as one. Without a fit report
+                the catalogue's target is stated as a target, because
+                presenting it as a measurement would be inventing a number,
+                and "Speed unknown" is noise on a card. */}
             {model.estimatedTokensPerSecond
               ? `~${Math.round(model.estimatedTokensPerSecond)} words/sec`
-              : 'Speed unknown'}
+              : `${Math.round(model.targetTokensPerSecond)} words/sec target`}
           </dd>
         </div>
         <div>

@@ -284,3 +284,43 @@ if (process.platform === 'win32') {
     }
   })
 }
+
+// A Windows install where both git clones failed — host-key rejection, then a
+// reset connection — and install.ps1 fell back to a ZIP archive. `git init`
+// then left a repository with a branch and a remote but no commits, so the
+// stamp carries no commit. Refusing there would leave a machine that already
+// struggled to clone unable to bootstrap at all.
+test('resolveInstallScript falls back to the branch when a ZIP install left no commit', async () => {
+  const calls = []
+  const result = await resolveInstallScript({
+    installStamp: { commit: null, branch: 'main', source: 'zip-install' },
+    sourceRepoRoot: null,
+    hermesHome: os.tmpdir(),
+    emit: () => {},
+    _download: async (ref, dest) => {
+      calls.push(ref)
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.writeFileSync(dest, '# script')
+      return dest
+    }
+  })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0], 'main', 'should fetch the branch, not a SHA')
+  assert.equal(result.commit, null)
+  assert.equal(result.branch, 'main')
+})
+
+test('resolveInstallScript still refuses a stamp with neither commit nor branch', async () => {
+  await assert.rejects(
+    resolveInstallScript({
+      installStamp: { commit: null, branch: null, source: 'zip-install' },
+      sourceRepoRoot: null,
+      hermesHome: os.tmpdir(),
+      emit: () => {},
+      _download: async () => {
+        throw new Error('should not be called')
+      }
+    }),
+    /no SOURCE_REPO_ROOT and no install stamp/
+  )
+})

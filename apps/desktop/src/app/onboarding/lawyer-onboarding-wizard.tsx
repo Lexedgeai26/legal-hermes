@@ -13,6 +13,8 @@ import {
   getGlobalModelOptions,
   getOnboardingStatus,
   getPracticeRoleSoulTemplate,
+  getPrivateAICapability,
+  cancelPrivateAIProvision,
   getPrivateAIProvisionStatus,
   getRecommendedDefaultModel,
   getSkills,
@@ -25,14 +27,20 @@ import {
   updateProfileSoul,
   validateProviderCredential
 } from '@/hermes'
-import type { PrivateAIProvisionStatus } from '@/hermes'
-import { CheckCircle2, KeyRound, Loader2, MessageCircle, Users } from '@/lib/icons'
+import type { PrivateAICapability, PrivateAIProvisionStatus } from '@/hermes'
+import { CheckCircle2, KeyRound, Loader2, MessageCircle, Users, X } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { notifyError } from '@/store/notifications'
 import { ensureGatewayProfile } from '@/store/profile'
 import type { LexEdgePracticeCatalog, ModelOptionProvider, OnboardingStatus, SkillInfo } from '@/types/hermes'
 
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const FORCE_ONBOARDING_KEY = 'lexedge:onboarding:force'
+// Cached client-side so a slow cold-start backend (getOnboardingStatus timing
+// out on the day's first launch — see withBackendWarmup) doesn't get
+// misread as "never onboarded" and send an already-set-up user through the
+// wizard again. Only ever trusted as a fallback when the live check fails.
+const LAST_KNOWN_COMPLETED_KEY = 'lexedge:onboarding:lastKnownCompleted'
 
 const PRACTICE_ROLES = [
   {
@@ -307,10 +315,13 @@ function detectBrowserLanguage(): string {
 }
 
 function detectBrowserTimeZone(): string {
+  // UTC, not a regional guess. The browser answers correctly almost always;
+  // when it cannot, a neutral fallback is honest where a specific city is a
+  // silent assertion about where the user practises.
   if (typeof Intl === 'undefined') {
-    return 'Asia/Kolkata'
+    return 'UTC'
   }
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata'
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
 function normaliseProfileName(value: string): string {
@@ -429,6 +440,25 @@ function skillsForLegalGroup(group: (typeof LEGAL_SKILL_GROUPS)[number], skills:
 ///
 /// With no primary marked, any row still counts: a practice listing an Indian
 /// court anywhere should be offered the pack rather than have it hidden.
+/// The stages Private AI provisioning reports, in the order they run.
+///
+/// The screen previously showed a single bar and a line of detail, so a user
+/// watching a multi-gigabyte install could not tell which of eight steps they
+/// were on, how many remained, or whether anything had completed (QA
+/// 01-SIT-017). The names match those emitted by
+/// hermes_cli/private_ai_provision.py; an unrecognised stage simply does not
+/// highlight a row rather than breaking the list.
+const PRIVATE_AI_STAGES: Array<{ id: string; label: string }> = [
+  { id: 'resolve', label: 'Check the approved runtime' },
+  { id: 'download-runtime', label: 'Download the runtime' },
+  { id: 'install-runtime', label: 'Install the runtime' },
+  { id: 'start-runtime', label: 'Start the runtime' },
+  { id: 'install-generation-model', label: 'Download the legal model' },
+  { id: 'install-embedding-model', label: 'Download the document-search model' },
+  { id: 'validate', label: 'Verify the models' },
+  { id: 'complete', label: 'Finish setup' }
+]
+
 function isIndiaJurisdiction(
   rows: Array<{ country: string; is_primary?: boolean }>,
   fallback: string
@@ -518,13 +548,19 @@ export function LawyerOnboardingWizard({
   const [mobileNumber, setMobileNumber] = useState('')
   const [practiceAddress, setPracticeAddress] = useState('')
   const [practiceContact, setPracticeContact] = useState('')
-  const [jurisdictions, setJurisdictions] = useState('India\nSupreme Court of India\nHigh Court\nDistrict Courts')
+  // Empty by design. A seeded value here is not a convenience: it is an answer
+  // given on the lawyer's behalf, and it decided which legal skills they were
+  // offered. The wizard already refuses to continue without a jurisdiction, so
+  // an empty start asks the question instead of presuming it.
+  const [jurisdictions, setJurisdictions] = useState('')
   const [positionTitle, setPositionTitle] = useState('')
   const [barRegistrationNumber, setBarRegistrationNumber] = useState('')
   const [yearsExperience, setYearsExperience] = useState('')
   const [primaryLanguage, setPrimaryLanguage] = useState(() => detectBrowserLanguage())
   const [timeZone, setTimeZone] = useState(() => detectBrowserTimeZone())
-  const [professionalRoles, setProfessionalRoles] = useState<string[]>(['Advocate'])
+  // "Advocate" is the Indian and wider Commonwealth term; a US attorney or an
+  // England-and-Wales solicitor is neither. Left for the user to state.
+  const [professionalRoles, setProfessionalRoles] = useState<string[]>([])
   const [secondaryLanguages, setSecondaryLanguages] = useState<string[]>([])
   const [legalSystem, setLegalSystem] = useState('Common Law')
   const [draftingStyle, setDraftingStyle] = useState('Formal')
@@ -533,42 +569,50 @@ export function LawyerOnboardingWizard({
   const [practiceAreas, setPracticeAreas] = useState<string[]>(['Civil Litigation'])
   const [clientTypes, setClientTypes] = useState<string[]>(['Individuals'])
   const [workTypes, setWorkTypes] = useState<string[]>(['Litigation', 'Drafting', 'Legal Research'])
-  const [courtTypes, setCourtTypes] = useState<string[]>(['High Court'])
-  const [citationStyles, setCitationStyles] = useState<string[]>(['Indian Neutral Citation'])
-  const [complianceFrameworks, setComplianceFrameworks] = useState<string[]>(['India DPDP Act'])
+  const [courtTypes, setCourtTypes] = useState<string[]>([])
+  // Citation style and compliance regime are jurisdiction-specific, so there is
+  // no sensible default before the jurisdiction is known — and a wrong one is
+  // worse than none, because a ticked box reads as advice about which rules
+  // apply. Both are free-choice lists the lawyer completes.
+  const [citationStyles, setCitationStyles] = useState<string[]>([])
+  const [complianceFrameworks, setComplianceFrameworks] = useState<string[]>([])
   const [documentTypes, setDocumentTypes] = useState<string[]>(['Petition', 'Affidavit', 'Legal Opinion'])
   const [notificationPreferences, setNotificationPreferences] = useState<string[]>(['Court Updates', 'Judgment Updates'])
   const [jurisdictionRows, setJurisdictionRows] = useState<
     Array<{ bench: string; country: string; court: string; court_type: string; is_primary: boolean; legal_system: string; region: string; state: string }>
-  >([
-    {
-      bench: '',
-      country: 'India',
-      court: 'Supreme Court of India',
-      court_type: 'Supreme Court',
-      is_primary: true,
-      legal_system: 'Common Law',
-      region: 'New Delhi',
-      state: 'India'
-    }
-  ])
+  >([])
   const [jurisdictionDraft, setJurisdictionDraft] = useState({
     bench: '',
-    country: 'India',
-    court: 'Supreme Court of India',
-    court_type: 'Supreme Court',
-    legal_system: 'Common Law',
-    region: 'New Delhi',
-    state: 'India'
+    country: '',
+    court: '',
+    court_type: '',
+    legal_system: '',
+    region: '',
+    state: ''
   })
-  const [selectedSkillGroups, setSelectedSkillGroups] = useState<string[]>(() => defaultLegalSkillGroupIds(true))
+  // Start without the India-only pack: it is enabled by the effect below once a
+  // jurisdiction actually says India. Pre-selecting it meant a German or
+  // Australian practice began onboarding with Indian statutory skills ticked.
+  const [selectedSkillGroups, setSelectedSkillGroups] = useState<string[]>(() => defaultLegalSkillGroupIds(false))
   const [selectedCapabilityGroups, setSelectedCapabilityGroups] = useState<string[]>([])
   const [soul, setSoul] = useState('')
   const [providers, setProviders] = useState<ModelOptionProvider[]>([])
   const [providerSlug, setProviderSlug] = useState('')
+  // The provider actually saved in config.yaml, from the fast/reliable
+  // getOnboardingStatus() call — used as a fallback when the live provider
+  // list's own is_current flag misses. That flag comes from a snapshot of
+  // /api/model/options, which can be taken before a local runtime like
+  // Private AI has finished detecting itself; without this, an
+  // already-configured Private AI setup can silently fall through to
+  // whichever provider happens to have an API key on the machine.
+  const preferredProviderFromStatusRef = useRef<string | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [privateAiJob, setPrivateAiJob] = useState<PrivateAIProvisionStatus | null>(null)
   const [privateAiJobError, setPrivateAiJobError] = useState<string | null>(null)
+  // Null until checked. Private AI is offered only once the machine is known
+  // to be able to run it — an 8 GB laptop previously got the full setup button
+  // and discovered the problem several gigabytes into a download.
+  const [privateAiCapability, setPrivateAiCapability] = useState<PrivateAICapability | null>(null)
   const [modelSelection, setModelSelection] = useState<null | { model: string; provider: string }>(null)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [aiDisclaimerAccepted, setAiDisclaimerAccepted] = useState(false)
@@ -576,6 +620,18 @@ export function LawyerOnboardingWizard({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Error banners used to only clear when the user navigated to another
+  // step and back — nothing here ever timed out or could be dismissed.
+  // Auto-clear after a few seconds; a fresh error resets the clock rather
+  // than being cut off by whatever time was left on the previous one.
+  useEffect(() => {
+    if (!error) {
+      return
+    }
+    const timer = setTimeout(() => setError(null), 6000)
+    return () => clearTimeout(timer)
+  }, [error])
 
   const providerRows = useMemo(
     () =>
@@ -617,6 +673,9 @@ export function LawyerOnboardingWizard({
         if (cancelled) {
           return
         }
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(LAST_KNOWN_COMPLETED_KEY, next.completed ? '1' : '0')
+        }
         setStatus(next)
         setVisible(forceOnboarding || !next.completed)
         if (next.completed && !forceOnboarding) {
@@ -628,11 +687,33 @@ export function LawyerOnboardingWizard({
         if (next.profile_name) {
           setProfileName(next.profile_name === 'default' ? 'lexedge-practice' : next.profile_name)
         }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setVisible(true)
+        // practiceRole otherwise stays hardcoded at its useState default
+        // ('litigation-lawyer') every time this mounts, silently discarding
+        // whatever the user actually picked on a prior run even though it's
+        // sitting right here in the profile the backend already saved.
+        const savedPracticeRole = next.profile?.practice_role
+        if (savedPracticeRole && PRACTICE_ROLES.some(role => role.value === savedPracticeRole)) {
+          setPracticeRole(savedPracticeRole)
         }
+        preferredProviderFromStatusRef.current = next.profile?.provider ?? null
+      })
+      .catch(err => {
+        if (cancelled) {
+          return
+        }
+        // A slow cold-start backend (see withBackendWarmup) rejects here on
+        // the day's first launch. Previously this always showed the wizard,
+        // which wrongly sent already-onboarded users through setup again —
+        // trust the last confirmed status instead of assuming "never
+        // onboarded" just because this one check couldn't complete in time.
+        const lastKnownCompleted =
+          typeof window !== 'undefined' && window.localStorage.getItem(LAST_KNOWN_COMPLETED_KEY) === '1'
+        if (lastKnownCompleted && !forceOnboarding) {
+          setVisible(false)
+          notifyError(err, 'Could not reach LexEdge to check setup status.')
+          return
+        }
+        setVisible(true)
       })
 
     getGlobalModelOptions({ refresh: true })
@@ -651,8 +732,15 @@ export function LawyerOnboardingWizard({
             // stopped) — otherwise reopening this step after a restart
             // silently jumps to an unrelated provider instead of the one
             // the user actually configured.
+            // is_current comes from this same live snapshot, which can be
+            // taken before a local runtime (Private AI) has finished
+            // detecting itself — so also fall back to the provider the
+            // fast/reliable onboarding-status call already told us was
+            // configured, before giving up and picking whatever merely has
+            // an API key sitting in the environment.
             const preferred =
               sorted.find(provider => provider.is_current) ??
+              sorted.find(provider => provider.slug === preferredProviderFromStatusRef.current) ??
               sorted.find(provider => provider.authenticated || Boolean(providerKeyEnv(provider))) ??
               sorted[0]
             return preferred?.slug ?? ''
@@ -667,7 +755,7 @@ export function LawyerOnboardingWizard({
           setPracticeCatalog(catalog)
           setPositionTitle(current => current || catalog.options.position_titles?.[0] || '')
           setPrimaryLanguage(current => current || catalog.options.languages?.[0] || 'English')
-          setTimeZone(current => current || catalog.options.time_zones?.[0] || 'Asia/Kolkata')
+          setTimeZone(current => current || catalog.options.time_zones?.[0] || 'UTC')
           setLegalSystem(current => current || catalog.options.legal_systems?.[0] || 'Common Law')
           setDraftingStyle(current => current || catalog.options.drafting_styles?.[0] || 'Formal')
           setWritingPreference(current => current || catalog.options.writing_preferences?.[1] || catalog.options.writing_preferences?.[0] || 'Balanced')
@@ -721,7 +809,37 @@ export function LawyerOnboardingWizard({
     })
   }, [jurisdictionRows, jurisdictions])
 
+  useEffect(() => {
+    let cancelled = false
+    getPrivateAICapability()
+      .then(result => {
+        if (!cancelled) setPrivateAiCapability(result)
+      })
+      .catch(() => {
+        // A machine we could not measure is not blocked: refusing on a failed
+        // probe would be worse than letting a capable machine try.
+        if (!cancelled) setPrivateAiCapability(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const privateAiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  /// Ask the running Private AI job to stop.
+  ///
+  /// The poll below keeps running: the job reports cancelRequested straight
+  /// away and cancelled once it has actually stopped, so the UI reflects both
+  /// the request and the outcome without guessing at either.
+  async function cancelPrivateAiJob(): Promise<void> {
+    try {
+      await cancelPrivateAIProvision()
+      setPrivateAiJob(current => (current ? { ...current, cancelRequested: true } : current))
+    } catch (err) {
+      setPrivateAiJobError(err instanceof Error ? err.message : 'Could not cancel Private AI setup.')
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -920,6 +1038,11 @@ export function LawyerOnboardingWizard({
       }
 
       const refreshed = await getGlobalModelOptions({ refresh: true })
+      // Mirror runPrivateAiJob above: without this, the freshly-authenticated
+      // provider never lands in the state the status tags read from, so
+      // clicking Back after a successful cloud-provider connection shows it
+      // as not connected again even though it saved and tested fine.
+      setProviders(refreshed.providers ?? [])
       const provider =
         refreshed.providers?.find(item => item.slug === selectedProvider.slug) ??
         selectedProvider
@@ -1151,7 +1274,7 @@ export function LawyerOnboardingWizard({
         <div className="flex-1 overflow-auto px-6 py-8 lg:px-10">
           {(error || message) && (
             <div className="sticky top-0 z-20 mx-auto max-w-5xl pb-4">
-              <StatusAlert error={error} message={message} />
+              <StatusAlert error={error} message={message} onDismissError={() => setError(null)} />
             </div>
           )}
 
@@ -1269,33 +1392,134 @@ export function LawyerOnboardingWizard({
                   <div className="mt-8 max-w-xl">
                     {privateAiJob?.active ? (
                       <div className="rounded-[6px] border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {privateAiJob.detail || 'Working...'}
+                        {(() => {
+                          const currentIndex = PRIVATE_AI_STAGES.findIndex(
+                            stage => stage.id === privateAiJob.stage
+                          )
+                          return (
+                            <>
+                              <div className="flex items-center justify-between text-sm font-medium">
+                                <span className="flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  {privateAiJob.detail || 'Working...'}
+                                </span>
+                                {currentIndex >= 0 && (
+                                  <span className="text-(--ui-text-secondary)">
+                                    Step {currentIndex + 1} of {PRIVATE_AI_STAGES.length}
+                                  </span>
+                                )}
+                              </div>
+                              {privateAiJob.percent != null && (
+                                <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                                  <div
+                                    className="h-full rounded-full bg-primary transition-all"
+                                    style={{ width: `${Math.min(100, Math.max(0, privateAiJob.percent))}%` }}
+                                  />
+                                </div>
+                              )}
+                              <ol className="mt-4 space-y-1.5">
+                                {PRIVATE_AI_STAGES.map((stage, index) => {
+                                  // Before the first recognised stage arrives
+                                  // nothing is marked done, so an unknown stage
+                                  // never reports false progress.
+                                  const done = currentIndex >= 0 && index < currentIndex
+                                  const active = index === currentIndex
+                                  return (
+                                    <li
+                                      className={cn(
+                                        'flex items-center gap-2 text-sm',
+                                        done && 'text-(--ui-text-secondary)',
+                                        active && 'font-medium text-slate-900',
+                                        !done && !active && 'text-slate-400'
+                                      )}
+                                      key={stage.id}
+                                    >
+                                      <span aria-hidden className="w-4 text-center">
+                                        {done ? '✓' : active ? '•' : '·'}
+                                      </span>
+                                      <span>{stage.label}</span>
+                                      {active && privateAiJob.percent != null && (
+                                        <span className="text-(--ui-text-secondary)">
+                                          {Math.round(privateAiJob.percent)}%
+                                        </span>
+                                      )}
+                                    </li>
+                                  )
+                                })}
+                              </ol>
+                            </>
+                          )
+                        })()}
+                        {/* Setup downloads several gigabytes; without a way to
+                            stop it the only escape was quitting the app
+                            mid-install. The button reports the request
+                            immediately because a download cannot stop
+                            mid-chunk, and a screen that does not change reads
+                            as a broken button. */}
+                        <div className="mt-4 flex items-center gap-3">
+                          <Button
+                            disabled={Boolean(privateAiJob.cancelRequested)}
+                            onClick={() => void cancelPrivateAiJob()}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {privateAiJob.cancelRequested ? 'Cancelling...' : 'Cancel'}
+                          </Button>
+                          {privateAiJob.cancelRequested && (
+                            <span className="text-sm text-(--ui-text-secondary)">
+                              Stopping after the current step finishes.
+                            </span>
+                          )}
                         </div>
-                        {privateAiJob.percent != null && (
-                          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${Math.min(100, Math.max(0, privateAiJob.percent))}%` }}
-                            />
-                          </div>
-                        )}
                       </div>
                     ) : (
                       <>
-                        <Button
-                          disabled={busy}
-                          onClick={() => runPrivateAiJob(selectedProvider.status === 'not_setup' ? 'provision' : 'start')}
-                          type="button"
-                        >
-                          {selectedProvider.status === 'not_setup' ? 'Set up Private AI' : 'Start Private AI'}
-                        </Button>
-                        <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
-                          {selectedProvider.status === 'not_setup'
-                            ? 'Downloads and runs a local AI model on this computer. No API key, address, or port needed — nothing leaves this machine.'
-                            : 'Restarts the local AI model already installed on this computer. No download needed.'}
-                        </p>
+                        {/* A machine that cannot run a local model is told so
+                            before it downloads anything, and pointed at the
+                            cloud route — which is a complete product, not a
+                            degraded one. Starting an already-installed runtime
+                            stays available regardless: the models are there,
+                            and refusing would strand an existing install. */}
+                        {selectedProvider.status === 'not_setup' &&
+                        privateAiCapability &&
+                        !privateAiCapability.capable ? (
+                          <div className="rounded-[6px] border border-amber-200 bg-amber-50 p-4">
+                            <p className="m-0 text-sm font-medium text-slate-900">
+                              This computer can&rsquo;t run Private AI
+                            </p>
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-(--ui-text-secondary)">
+                              {privateAiCapability.reasons.map(reason => (
+                                <li key={reason}>{reason}</li>
+                              ))}
+                            </ul>
+                            <p className="mt-3 text-sm leading-6 text-(--ui-text-secondary)">
+                              Choose a cloud provider above instead. Every legal feature works the
+                              same way; only the place the model runs changes.
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <Button
+                              disabled={busy}
+                              onClick={() => runPrivateAiJob(selectedProvider.status === 'not_setup' ? 'provision' : 'start')}
+                              type="button"
+                            >
+                              {selectedProvider.status === 'not_setup' ? 'Set up Private AI' : 'Start Private AI'}
+                            </Button>
+                            <p className="mt-2 text-sm leading-6 text-(--ui-text-secondary)">
+                              {selectedProvider.status === 'not_setup'
+                                ? 'Downloads and runs a local AI model on this computer. No API key, address, or port needed — nothing leaves this machine.'
+                                : 'Restarts the local AI model already installed on this computer. No download needed.'}
+                            </p>
+                          </>
+                        )}
+                        {privateAiJob?.cancelled && !privateAiJobError && (
+                          <p className="mt-2 text-sm text-(--ui-text-secondary)">
+                            Private AI setup was cancelled. Nothing further was downloaded, and
+                            you can start it again at any time or continue with a cloud provider.
+                          </p>
+                        )}
                         {privateAiJobError && <p className="mt-2 text-sm text-red-600">{privateAiJobError}</p>}
                       </>
                     )}
@@ -1977,12 +2201,6 @@ export function LawyerOnboardingWizard({
                 </div>
               </section>
             )}
-
-            {(error || message) && (
-              <div className="mt-8">
-                <StatusAlert error={error} message={message} />
-              </div>
-            )}
           </div>
         </div>
 
@@ -2060,17 +2278,35 @@ function PrivacySafetyNote() {
   )
 }
 
-function StatusAlert({ error, message }: { error: string | null; message: string | null }) {
+function StatusAlert({
+  error,
+  message,
+  onDismissError
+}: {
+  error: string | null
+  message: string | null
+  onDismissError?: () => void
+}) {
   return (
     <div
       className={cn(
-        'rounded-[6px] border px-4 py-3 text-sm shadow-sm',
+        'flex items-start gap-3 rounded-[6px] border px-4 py-3 text-sm shadow-sm',
         error
           ? 'border-red-300 bg-red-50 text-red-700'
           : 'border-(--ui-stroke-secondary) bg-white text-(--ui-text-secondary)'
       )}
     >
-      {error ?? message}
+      <div className="flex-1">{error ?? message}</div>
+      {error && onDismissError && (
+        <button
+          aria-label="Dismiss error"
+          className="shrink-0 rounded p-0.5 text-red-700/70 hover:bg-red-100 hover:text-red-700"
+          onClick={onDismissError}
+          type="button"
+        >
+          <X className="size-4" />
+        </button>
+      )}
     </div>
   )
 }
