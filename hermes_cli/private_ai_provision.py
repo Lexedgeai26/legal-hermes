@@ -764,39 +764,50 @@ def provision_ollama_runtime(
 
     url, expected_sha256, expected_size = _resolve_component()
 
-    _check_cancelled(should_cancel)
-    on_progress("resolve", "Checking the approved runtime", None)
-    archive_path = _download_verified(
-        url,
-        expected_sha256,
-        expected_size,
-        home / "private-ai" / "downloads",
-        on_progress,
-        should_cancel,
-    )
+    try:
+        _check_cancelled(should_cancel)
+        on_progress("resolve", "Checking the approved runtime", None)
+        archive_path = _download_verified(
+            url,
+            expected_sha256,
+            expected_size,
+            home / "private-ai" / "downloads",
+            on_progress,
+            should_cancel,
+        )
 
-    _check_cancelled(should_cancel)
-    on_progress("install-runtime", "Extracting runtime", None)
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    if archive_path.suffix == ".zip":
-        _extract_zip(archive_path, runtime_dir)
-    else:
-        _extract_tar_gz(archive_path, runtime_dir)
+        _check_cancelled(should_cancel)
+        on_progress("install-runtime", "Extracting runtime", None)
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        if archive_path.suffix == ".zip":
+            _extract_zip(archive_path, runtime_dir)
+        else:
+            _extract_tar_gz(archive_path, runtime_dir)
 
-    executable_path = _ollama_executable_path(runtime_dir)
-    if not executable_path.exists():
-        raise ProvisionError("The runtime archive contains no ollama executable.")
+        executable_path = _ollama_executable_path(runtime_dir)
+        if not executable_path.exists():
+            raise ProvisionError("The runtime archive contains no ollama executable.")
 
-    _check_cancelled(should_cancel)
-    on_progress("start-runtime", "Starting the runtime", None)
-    models_dir = home / "private-ai" / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
-    info = start_managed_runtime(executable_path, models_dir)
+        _check_cancelled(should_cancel)
+        on_progress("start-runtime", "Starting the runtime", None)
+        models_dir = home / "private-ai" / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        info = start_managed_runtime(executable_path, models_dir)
 
-    pull_default_models(info.base_url, on_progress, should_cancel)
+        pull_default_models(info.base_url, on_progress, should_cancel)
 
-    on_progress("validate", "Verifying the models", None)
-    write_runtime_json(info, validated=True)
+        on_progress("validate", "Verifying the models", None)
+        write_runtime_json(info, validated=True)
+    except BaseException:
+        # The guard above only allows this call to run when runtime_dir
+        # didn't exist or was empty, so anything in it now was created by
+        # this attempt. A cancel or a failure partway through (extraction,
+        # start-up, model pull) must not leave those files behind -- the
+        # next attempt's "already exists" guard would see them and refuse
+        # to ever retry, permanently locking the user out of Private AI
+        # setup after one interrupted install.
+        shutil.rmtree(runtime_dir, ignore_errors=True)
+        raise
 
     on_progress("complete", "Private AI is ready", 100.0)
     return info

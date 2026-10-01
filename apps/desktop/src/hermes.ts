@@ -758,7 +758,12 @@ export function createMatter(body: MatterCreatePayload): Promise<MatterResponse>
     ...profileScoped(),
     path: '/api/matters',
     method: 'POST',
-    body
+    body,
+    // Creating a matter indexes its folder synchronously on the backend before
+    // responding, which can take longer than the default 15s on a large folder
+    // or a slow disk -- without this the request times out client-side while
+    // the backend is still scanning, surfacing as a false "could not create".
+    timeoutMs: 60_000
   })
 }
 
@@ -775,7 +780,8 @@ export function indexMatter(matterId: string): Promise<MatterResponse> {
   return window.hermesDesktop.api<MatterResponse>({
     ...profileScoped(),
     path: `/api/matters/${encodeURIComponent(matterId)}/index`,
-    method: 'POST'
+    method: 'POST',
+    timeoutMs: 60_000
   })
 }
 

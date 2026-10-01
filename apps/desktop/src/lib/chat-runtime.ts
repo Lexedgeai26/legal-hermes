@@ -62,9 +62,43 @@ export function sessionTitle(session: SessionInfo): string {
   return session.title?.trim() || session.preview?.trim() || 'Untitled session'
 }
 
+const JSON_ENVELOPE_KEYS = ['body', 'text', 'message', 'content']
+
+/**
+ * Some providers occasionally reply with a single-key JSON object (e.g.
+ * `{"body": "Hello..."}`) as plain text instead of actual prose -- the shape
+ * of a message-sending tool payload bleeding into a turn where no tool was
+ * called. Unwrap only the narrow case of a whole string that parses as an
+ * object with exactly one string field from the allow-list above, so this
+ * never touches a reply that legitimately contains or discusses JSON.
+ */
+function unwrapJsonEnvelopeText(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return value
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return value
+    }
+
+    const entries = Object.entries(parsed as Record<string, unknown>)
+    if (entries.length !== 1) {
+      return value
+    }
+
+    const [key, inner] = entries[0]
+    return JSON_ENVELOPE_KEYS.includes(key) && typeof inner === 'string' ? inner : value
+  } catch {
+    return value
+  }
+}
+
 export function coerceGatewayText(value: unknown): string {
   if (typeof value === 'string') {
-    return value
+    return unwrapJsonEnvelopeText(value)
   }
 
   if (value === null || value === undefined) {

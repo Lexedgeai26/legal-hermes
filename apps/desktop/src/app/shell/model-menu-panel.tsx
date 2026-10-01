@@ -254,7 +254,11 @@ export function ModelMenuPanel({ gateway, onSelectModel, requestGateway }: Model
         ? copy.privateAiNoModelsHint
         : ''
 
-  const privateAiRow = privateAi ? (
+  // Suppress the row entirely for "not_setup" -- unlike the actionable
+  // unreachable_configured/reachable_no_models cases below, there is nothing
+  // to do here but go to Settings and start a multi-GB download, so the row
+  // was pure clutter sitting above providers the lawyer already has working.
+  const privateAiRow = privateAi && privateAi.status !== 'not_setup' ? (
     <DropdownMenuGroup className="py-0.5">
       <DropdownMenuLabel className={dropdownMenuSectionLabel}>{privateAi.name}</DropdownMenuLabel>
       <DropdownMenuItem

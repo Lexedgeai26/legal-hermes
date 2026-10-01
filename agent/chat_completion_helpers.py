@@ -38,6 +38,32 @@ from utils import base_url_host_matches, base_url_hostname, env_int
 
 logger = logging.getLogger(__name__)
 
+_JSON_ENVELOPE_KEYS = {"body", "text", "message", "content"}
+
+
+def _unwrap_json_envelope_content(text: str) -> str:
+    """Unwrap a reply that is itself a single-key JSON object, e.g. ``{"body": "..."}``.
+
+    Smaller local models (Ollama's llama3.1:8b and similar) sometimes imitate
+    the shape of a message-sending tool payload in plain content when no tool
+    call was actually made -- weaker instruction-following than cloud models,
+    most often triggered by a prompt that talks about sending/filing/signing.
+    Only unwrap a whole string that parses as an object with exactly one
+    string field from the allow-list, so a reply that legitimately contains
+    or discusses JSON is left untouched.
+    """
+    trimmed = text.strip()
+    if not trimmed.startswith("{") or not trimmed.endswith("}"):
+        return text
+    try:
+        parsed = json.loads(trimmed)
+    except json.JSONDecodeError:
+        return text
+    if not isinstance(parsed, dict) or len(parsed) != 1:
+        return text
+    (key, value), = parsed.items()
+    return value if key in _JSON_ENVELOPE_KEYS and isinstance(value, str) else text
+
 
 def _ra():
     """Lazy ``run_agent`` reference.
@@ -2001,6 +2027,8 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
 
         # Build mock response matching non-streaming shape
         full_content = "".join(content_parts) or None
+        if full_content and not tool_calls_acc:
+            full_content = _unwrap_json_envelope_content(full_content)
         mock_tool_calls = None
         has_truncated_tool_args = False
         if tool_calls_acc:

@@ -355,13 +355,21 @@ pub fn recommend_models(request: RecommendationRequest) -> Result<Recommendation
                     .push("Profile is not included in the resolved entitlement".to_string());
             }
         }
-        if request.hardware.total_ram_gb < profile.minimum_ram_gb {
+        // Compare against the rounded figure, not the raw reading: the
+        // motherboard/integrated GPU/BIOS reserve a slice of RAM before the
+        // OS ever sees it, so a machine sold and labelled "16 GB" almost
+        // always reports ~15.8-15.9 GB here. A strict `<` against a round
+        // threshold like 16.0 rejected essentially every real 16 GB
+        // machine (mirrors the identical fix in
+        // hermes_cli/private_ai_provision.py's check_system_capability).
+        let detected_ram_gb = request.hardware.total_ram_gb.round();
+        if detected_ram_gb < profile.minimum_ram_gb {
             hard_failures.push(format!(
                 "Requires at least {:.1} GB RAM; detected {:.1} GB",
                 profile.minimum_ram_gb, request.hardware.total_ram_gb
             ));
         }
-        if fallback && request.hardware.total_ram_gb < profile.recommended_ram_gb {
+        if fallback && detected_ram_gb < profile.recommended_ram_gb {
             hard_failures.push(format!(
                 "Conservative fallback requires {:.1} GB recommended RAM; detected {:.1} GB",
                 profile.recommended_ram_gb, request.hardware.total_ram_gb
@@ -968,6 +976,28 @@ mod tests {
             .compatible
             .iter()
             .all(|item| item.fit == "unknown" && !item.warnings.is_empty()));
+    }
+
+    #[test]
+    fn conservative_fallback_accepts_a_real_16gb_machine() {
+        // A machine sold and labelled "16 GB" almost never reports exactly
+        // 16.0 here -- the motherboard/integrated GPU/BIOS reserve a slice,
+        // so this mirrors what hardware.rs's bytes_to_gb() actually produces
+        // on real hardware (e.g. 15.9). Regression test for the rounding
+        // bug: this used to be hard-excluded by "requires 16.0 GB recommended".
+        let mut request = request();
+        request.fit_report = None;
+        request.hardware.total_ram_gb = 15.9;
+        request.hardware.available_ram_gb = 11.9;
+        let response = recommend_models(request).unwrap();
+        assert!(
+            response
+                .compatible
+                .iter()
+                .any(|item| item.profile_id == "legal-standard"),
+            "a real 16 GB machine must not be excluded by the conservative RAM fallback: {:?}",
+            response.excluded
+        );
     }
 
     #[test]

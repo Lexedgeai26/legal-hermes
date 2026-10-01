@@ -48,6 +48,7 @@ SKIP_DIR_NAMES = {
 
 MAX_INDEX_FILES = 500
 MAX_INDEX_DEPTH = 4
+MAX_SCAN_ENTRIES = 20_000
 
 
 @dataclass
@@ -249,8 +250,18 @@ def get_matter(matter_id: str) -> MatterRecord:
 def _scan_files(root: Path) -> tuple[list[MatterFile], int]:
     files: list[MatterFile] = []
     skipped = 0
+    visited = 0
     root = root.resolve()
     for current, dirs, names in os.walk(root):
+        # A matter folder is expected to hold a few hundred case documents. A
+        # folder picked by mistake (e.g. a system directory) can contain far
+        # more entries than that even within MAX_INDEX_DEPTH, and os.walk keeps
+        # listing every directory regardless of how many files were already
+        # kept -- this bound stops the scan outright instead of running for
+        # minutes on a folder that was never a real matter.
+        if visited >= MAX_SCAN_ENTRIES:
+            skipped += 1
+            break
         current_path = Path(current)
         depth = len(current_path.relative_to(root).parts)
         dirs[:] = [
@@ -259,6 +270,10 @@ def _scan_files(root: Path) -> tuple[list[MatterFile], int]:
             if item not in SKIP_DIR_NAMES and not item.startswith(".") and depth < MAX_INDEX_DEPTH
         ]
         for name in names:
+            visited += 1
+            if visited >= MAX_SCAN_ENTRIES:
+                skipped += 1
+                break
             if len(files) >= MAX_INDEX_FILES:
                 skipped += 1
                 continue
