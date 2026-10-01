@@ -7,6 +7,7 @@ import { useI18n } from '@/i18n'
 import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
 import { normalizePersonalityValue } from '@/lib/chat-runtime'
 import { embeddedImageUrls, textWithoutEmbeddedImages } from '@/lib/embedded-images'
+import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { setSessionYolo } from '@/lib/yolo-session'
 import { clearQueuedPrompts } from '@/store/composer-queue'
 import { $pinnedSessionIds } from '@/store/layout'
@@ -305,7 +306,12 @@ function applyRuntimeInfo(info: SessionRuntimeInfo | undefined): SessionRuntimeS
 
   reportBackendContract(info.desktop_contract)
 
-  if (info.credential_warning) {
+  // Same genuine-vs-transient filter as use-message-stream.ts's
+  // credential_warning handler: a setup.runtime_check timeout (most often
+  // from a local Ollama generation saturating the machine's CPU) must not
+  // be treated as "no provider configured" and kick the user into full
+  // onboarding mid-session.
+  if (info.credential_warning && isProviderSetupErrorMessage(info.credential_warning)) {
     requestDesktopOnboarding(info.credential_warning)
   }
 

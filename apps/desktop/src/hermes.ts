@@ -1097,9 +1097,17 @@ export function resetOnboarding(): Promise<OnboardingStatus> {
 }
 
 export function getLexEdgePracticeCatalog(): Promise<LexEdgePracticeCatalog> {
-  return window.hermesDesktop.api<LexEdgePracticeCatalog>({
-    path: '/api/lexedge/practice/catalog'
-  })
+  // Reached from onboarding against a cold backend — see withBackendWarmup.
+  // Without this, a slow first start timed out silently (the wizard's .catch
+  // swallows the error) and left every dropdown fed by this catalog --
+  // Country, Court type, Legal system, etc. -- permanently empty for the
+  // rest of the session, since nothing ever retried the fetch.
+  return withBackendWarmup(() =>
+    window.hermesDesktop.api<LexEdgePracticeCatalog>({
+      path: '/api/lexedge/practice/catalog',
+      timeoutMs: ONBOARDING_REQUEST_TIMEOUT_MS
+    })
+  )
 }
 
 export function saveLexEdgePracticeProfile(

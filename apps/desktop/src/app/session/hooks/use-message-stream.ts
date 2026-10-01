@@ -833,7 +833,17 @@ export function useMessageStream({
           setCurrentUsage(current => ({ ...current, ...payload.usage }))
         }
 
-        if (typeof payload?.credential_warning === 'string' && payload.credential_warning) {
+        // Only a genuine "no provider configured" message should pull the
+        // user out of chat into full onboarding. credential_warning can also
+        // carry a transient setup.runtime_check timeout -- that RPC is a
+        // cheap config read (tui_gateway/server.py's setup.runtime_check),
+        // so it only times out when the single backend process is busy
+        // elsewhere, most commonly driving a local Ollama generation that
+        // saturates the machine's CPU. Treating that as "you have no
+        // provider" was kicking users out of an otherwise-working session
+        // mid-turn. Reuses the same filter the sibling `error` event handler
+        // below already applies for exactly this reason.
+        if (typeof payload?.credential_warning === 'string' && isProviderSetupErrorMessage(payload.credential_warning)) {
           requestDesktopOnboarding(payload.credential_warning)
         }
 

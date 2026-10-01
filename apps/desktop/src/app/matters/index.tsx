@@ -208,7 +208,19 @@ export function MattersView() {
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background text-foreground">
-      <header className="shrink-0 border-b border-border/70 px-6 py-5">
+      {/*
+        pt reserves space for TitlebarControls, which is `position: fixed` at
+        z-70 (app-shell.tsx/titlebar-controls.tsx) and floats independently of
+        page content. Other routed pages don't collide with it because
+        nothing else sits in the top-right corner, but this header's "Open in
+        chat" button does, and was rendering underneath the titlebar icons
+        without this -- the same clearance Settings already applies via
+        OverlayMain's pt-[calc(var(--titlebar-height)+1rem)].
+      */}
+      <header
+        className="shrink-0 border-b border-border/70 px-6 pb-5"
+        style={{ paddingTop: 'calc(var(--titlebar-height) + 1.25rem)' }}
+      >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Matter Workspaces</h1>
@@ -222,7 +234,16 @@ export function MattersView() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(20rem,25rem)_minmax(0,1fr)] overflow-hidden">
+      {/*
+        gridTemplateColumns is set inline rather than via a Tailwind
+        grid-cols-[...] arbitrary-value class: that exact class string was
+        verified absent from the compiled production CSS (confirmed against
+        the shipped bundle), so the container fell back to an implicit
+        single-column grid and the aside/main panes rendered on top of each
+        other instead of side by side. Inline style can't be dropped by the
+        build.
+      */}
+      <div className="grid min-h-0 flex-1 overflow-hidden" style={{ gridTemplateColumns: 'minmax(20rem, 25rem) minmax(0, 1fr)' }}>
         <aside className="min-h-0 border-r border-border/70 bg-muted/20">
           <div className="border-b border-border/70 p-4">
             <div className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">New matter</div>
@@ -440,10 +461,11 @@ function MatterDocumentRow({
 }) {
   return (
     <div
-      className={cn(
-        'grid items-center gap-3 px-4 py-2 text-sm',
-        prominent ? 'grid-cols-[1fr_5rem_9.5rem]' : 'grid-cols-[1fr_5rem_8rem_8.5rem]'
-      )}
+      className="grid items-center gap-3 px-4 py-2 text-sm"
+      // See the gridTemplateColumns comment above on the aside/main split --
+      // these two grid-cols-[...] arbitrary values were also confirmed
+      // missing from the compiled production CSS, so they're set inline too.
+      style={{ gridTemplateColumns: prominent ? '1fr 5rem 9.5rem' : '1fr 5rem 8rem 8.5rem' }}
     >
       <div className="flex min-w-0 items-center gap-2">
         <FileText className="size-4 shrink-0 text-muted-foreground" />
